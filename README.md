@@ -70,3 +70,8 @@ docs/                setup + Tailscale guides
 ## Credits
 
 FreedomOS was dreamed up by **[MatsuYoda-88](https://github.com/MatsuYoda-88)** and built together with **Claude** (Anthropic). It stands on a lot of great open-source work - see **[CREDITS.md](CREDITS.md)** for everyone who deserves a thank-you.
+
+## License
+
+FreedomOS's own code is under the **[MIT License](LICENSE)** - use it, change it, share it, just keep the copyright notice.
+The AI models, tools and services it downloads or opens each have their own licenses and terms - see [CREDITS.md](CREDITS.md).

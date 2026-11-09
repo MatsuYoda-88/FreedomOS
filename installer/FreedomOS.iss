@@ -30,6 +30,7 @@ SetupIconFile=..\app\f35.ico
 UninstallDisplayIcon={app}\f35.ico
 UninstallDisplayName=FreedomOS
 WizardStyle=modern
+LicenseFile=..\LICENSE
 Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=force
