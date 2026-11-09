@@ -710,7 +710,7 @@ class BrowserForm : Form
             if (app == "pixel")
             {   // 🖼 your wallpaper behind the Pixel Shop too (WiMix gets it from FreedomOS itself)
                 await w.AddScriptToExecuteOnDocumentCreatedAsync(@"addEventListener('DOMContentLoaded', () => {
-                  fetch('http://127.0.0.1:" + Ports.App + "/music/wall').then(r => r.json()).then(d => { if (!d.url) return;
+                  fetch('http://127.0.0.1:" + Ports.App + @"/music/wall').then(r => r.json()).then(d => { if (!d.url) return;
                     const st = document.createElement('style'); st.textContent = 'html,body{background:transparent!important}'; document.head.appendChild(st);
                     const f = document.createElement('iframe'); f.src = d.url; f.tabIndex = -1; f.setAttribute('aria-hidden','true');
                     f.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:-1;pointer-events:none;background:#000';
