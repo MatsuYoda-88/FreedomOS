@@ -28,7 +28,7 @@ jobs:
         run: python -m compileall -q app
 
       - name: Build WiBro (the FreedomOS app window)
-        run: dotnet publish app/browser/src/F35Browser.csproj -c Release -r win-x64 --self-contained true -o app/browser/builds/b0
+        run: dotnet publish app/browser/src/FreedomOS.csproj -c Release -r win-x64 --self-contained true -o app/browser/builds/b0
 
       - name: Mark it as the current build
         run: python installer/stamp_build.py

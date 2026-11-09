@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "boss_name": "Atlas",
   "checker_name": "Sentry",
   "workers": [
@@ -15,6 +15,7 @@
   "port": 7777,
   "remote_watch": true,
   "engine_port": 8080,
+  "devtools_port": 9343,
   "threads": 6,
   "extra_engine_args": [],
   "review": true,

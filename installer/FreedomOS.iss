@@ -1,6 +1,6 @@
 ; FreedomOS - Windows installer (Inno Setup 6)
 ; Built automatically by .github/workflows/build.yml. To build it yourself on Windows:
-;   1. Build WiBro:  dotnet publish app\browser\src\F35Browser.csproj -c Release -r win-x64 --self-contained true -o app\browser\builds\b0
+;   1. Build WiBro:  dotnet publish app\browser\src\FreedomOS.csproj -c Release -r win-x64 --self-contained true -o app\browser\builds\b0
 ;   2. Stamp it:     python installer\stamp_build.py
 ;   3. Compile:      iscc installer\FreedomOS.iss
 ; No admin needed - installs for your Windows user only, in %LOCALAPPDATA%\FreedomOS.
@@ -63,11 +63,11 @@ Name: "{userdesktop}\FreedomOS"; Filename: "{app}\FreedomOS.cmd"; WorkingDir: "{
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "FreedomOS"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
-Filename: "{app}\FreedomOS Setup.cmd"; WorkingDir: "{app}"; Description: "Finish setup and start FreedomOS (downloads Python + the brain engine)"; Flags: postinstall shellexec nowait
+Filename: "{app}\FreedomOS Setup.cmd"; WorkingDir: "{app}"; Description: "Finish setup and start FreedomOS (downloads Python + the brain engine)"; Flags: postinstall shellexec nowait skipifsilent
 
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""try {{ Invoke-WebRequest -Method Post -UseBasicParsing -TimeoutSec 4 http://127.0.0.1:7777/shutdown | Out-Null }} catch {{}}; Start-Sleep 2"""; Flags: runhidden; RunOnceId: "StopServer"
-Filename: "taskkill.exe"; Parameters: "/f /im F35Browser.exe"; Flags: runhidden; RunOnceId: "StopApp"
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""$p = 7777; try {{ $p = (Get-Content -Raw '{app}\config.json' | ConvertFrom-Json).port }} catch {{}}; try {{ Invoke-WebRequest -Method Post -UseBasicParsing -TimeoutSec 4 http://127.0.0.1:$p/shutdown | Out-Null }} catch {{}}; Start-Sleep 2"""; Flags: runhidden; RunOnceId: "StopServer"
+Filename: "taskkill.exe"; Parameters: "/f /im FreedomOS.exe"; Flags: runhidden; RunOnceId: "StopApp"
 Filename: "taskkill.exe"; Parameters: "/f /im llama-server.exe"; Flags: runhidden; RunOnceId: "StopEngine"
 
 [UninstallDelete]

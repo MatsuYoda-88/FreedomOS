@@ -45,7 +45,7 @@ Needs **Windows 10 (1809+) or Windows 11, 64-bit**, about **15 GB free disk**, *
 The installer is built by GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml)) on every push, and every push to `main` publishes it as the release named after `version` in `app/config.json` (bump the version for a new release). To build on your own Windows PC:
 
 ```bat
-dotnet publish app\browser\src\F35Browser.csproj -c Release -r win-x64 --self-contained true -o app\browser\builds\b0
+dotnet publish app\browser\src\FreedomOS.csproj -c Release -r win-x64 --self-contained true -o app\browser\builds\b0
 python installer\stamp_build.py
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\FreedomOS.iss
 ```

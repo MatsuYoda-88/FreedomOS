@@ -2,7 +2,7 @@
 
 The real YouTube Music runs in its own app window (Edge, its own profile, so you sign in ONCE and it's
 your library, likes, playlists and Premium). FreedomOS drives it through Edge's built-in remote control
-(a private door on this PC only, port 9333):
+(a private door on this PC only, port 9343 by default):
   - now playing (song, artist, cover, time) shows up in FreedomOS
   - play/pause, next, back, like from FreedomOS, the tray icon, or your keyboard's media keys
   - mini player: shrinks to a tiny always-on-top bar
@@ -22,7 +22,12 @@ from pathlib import Path
 from aiohttp import ClientSession, ClientTimeout, web
 
 IS_WIN = sys.platform == "win32"
-PORT = 9333
+PORT = 9343      # the app's private remote-control door (config.json "devtools_port")
+try:
+    import json as _json
+    PORT = int(_json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8")).get("devtools_port", 9343))
+except Exception:
+    pass
 URL = "https://music.youtube.com/"
 HERE = Path(__file__).resolve().parent
 
@@ -105,11 +110,17 @@ WALL_JS = """((url) => { let f = document.getElementById('f35wall');
   return 'on'; })"""
 
 
+try:
+    _APP_PORT = int(_json.loads((HERE / "config.json").read_text(encoding="utf-8")).get("port", 7777))
+except Exception:
+    _APP_PORT = 7777
+
+
 def wall_url():
     w = S.get("wall") or ""
     if not w or w == "off":
         return ""
-    return f"http://127.0.0.1:7777/widget/walls/{w}.html"
+    return f"http://127.0.0.1:{_APP_PORT}/widget/walls/{w}.html"
 
 
 async def lyrics_for(title, artist, dur):

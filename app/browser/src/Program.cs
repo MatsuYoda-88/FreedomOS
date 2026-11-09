@@ -16,12 +16,12 @@ static class Program
     static void Main(string[] args)
     {
         string url = args.Length > 0 ? args[0] : "";
-        using var mutex = new Mutex(true, "F35Browser_single_v1", out bool first);
+        using var mutex = new Mutex(true, "FreedomOS_single_" + Ports.App, out bool first);
         if (!first)
         {   // already open? hand the link to it (opens as a new tab) and quit
             try
             {
-                using var c = new NamedPipeClientStream(".", "F35Browser_pipe_v1", PipeDirection.Out);
+                using var c = new NamedPipeClientStream(".", "FreedomOS_pipe_" + Ports.App, PipeDirection.Out);
                 c.Connect(2000);
                 var b = Encoding.UTF8.GetBytes(string.IsNullOrEmpty(url) || url == "--show" ? "\u0002" : url == "--newtab" ? "\u0001" : url.StartsWith("--app=") ? "\u0003" + url[6..] : url);
                 c.Write(b, 0, b.Length);
@@ -185,16 +185,34 @@ class Tab
     public Point DownAt; public bool Dragging;
 }
 
+// FreedomOS's ports come from app\config.json ("port", "devtools_port") so two copies never fight over them
+static class Ports
+{
+    public static readonly int App = 7777, DevTools = 9343;
+    static Ports()
+    {
+        try
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);                      // app\browser\builds\b0\
+            var cfg = Path.Combine(dir.Parent.Parent.Parent.FullName, "config.json");
+            using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
+            if (doc.RootElement.TryGetProperty("port", out var p)) App = p.GetInt32();
+            if (doc.RootElement.TryGetProperty("devtools_port", out var d)) DevTools = d.GetInt32();
+        }
+        catch { }
+    }
+}
+
 class BrowserForm : Form
 {
-    const string F35 = "http://127.0.0.1:7777";
+    static readonly string F35 = "http://127.0.0.1:" + Ports.App;
     public static BrowserForm MainWin;
     public static bool StartShow, Restore;
     static readonly List<BrowserForm> All = new();
     static readonly Dictionary<string, (string name, string url)> Apps = new()
     {
         ["music"] = ("🎧 WiMix", "https://music.youtube.com/"),
-        ["pixel"] = ("🎨 Pixel Shop", "http://127.0.0.1:7777/pixel/app/"),
+        ["pixel"] = ("🎨 Pixel Shop", "http://127.0.0.1:" + Ports.App + "/pixel/app/"),
         ["discord"] = ("👾 Discord", "https://discord.com/app"),
     };
     static readonly Settings S = Settings.Load();
@@ -505,7 +523,7 @@ class BrowserForm : Form
     async Task Init()
     {
         var opts = new CoreWebView2EnvironmentOptions();
-        opts.AdditionalBrowserArguments = "--remote-debugging-port=9333 --remote-debugging-address=127.0.0.1 --autoplay-policy=no-user-gesture-required" + (S.GpuFix ? " --disable-gpu --disable-gpu-compositing" : "");
+        opts.AdditionalBrowserArguments = "--remote-debugging-port=" + Ports.DevTools + " --remote-debugging-address=127.0.0.1 --autoplay-policy=no-user-gesture-required" + (S.GpuFix ? " --disable-gpu --disable-gpu-compositing" : "");
         try
         {
             envTask ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(Settings.Home, "data"), opts);
@@ -692,7 +710,7 @@ class BrowserForm : Form
             if (app == "pixel")
             {   // 🖼 your wallpaper behind the Pixel Shop too (WiMix gets it from FreedomOS itself)
                 await w.AddScriptToExecuteOnDocumentCreatedAsync(@"addEventListener('DOMContentLoaded', () => {
-                  fetch('http://127.0.0.1:7777/music/wall').then(r => r.json()).then(d => { if (!d.url) return;
+                  fetch('http://127.0.0.1:" + Ports.App + "/music/wall').then(r => r.json()).then(d => { if (!d.url) return;
                     const st = document.createElement('style'); st.textContent = 'html,body{background:transparent!important}'; document.head.appendChild(st);
                     const f = document.createElement('iframe'); f.src = d.url; f.tabIndex = -1; f.setAttribute('aria-hidden','true');
                     f.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:-1;pointer-events:none;background:#000';
@@ -824,7 +842,7 @@ class BrowserForm : Form
 
     bool F35Up()
     {
-        try { using var c = new System.Net.Sockets.TcpClient(); var r = c.BeginConnect("127.0.0.1", 7777, null, null); return r.AsyncWaitHandle.WaitOne(250) && c.Connected; }
+        try { using var c = new System.Net.Sockets.TcpClient(); var r = c.BeginConnect("127.0.0.1", Ports.App, null, null); return r.AsyncWaitHandle.WaitOne(250) && c.Connected; }
         catch { return false; }
     }
 
@@ -1799,7 +1817,7 @@ class BrowserForm : Form
             {
                 try
                 {
-                    using var srv = new NamedPipeServerStream("F35Browser_pipe_v1", PipeDirection.In, 1);
+                    using var srv = new NamedPipeServerStream("FreedomOS_pipe_" + Ports.App, PipeDirection.In, 1);
                     srv.WaitForConnection();
                     using var r = new StreamReader(srv, Encoding.UTF8);
                     var url = r.ReadToEnd();

@@ -1,6 +1,6 @@
 """👾 Discord overlay brains - part of FreedomOS.
 
-Reads the Discord tab that lives inside FreedomOS (through the app's private remote-control door, port 9333, this PC only):
+Reads the Discord tab that lives inside FreedomOS (through the app's private remote-control door, port 9343 by default, this PC only):
 who's in voice + who's talking, your mute/deafen, the latest messages. Presses Discord's own buttons for you
 (mute, deafen, leave), drops the WiMix song into the chat, and - if the Discord desktop app is running and you've
 made a Discord "application" - shows "Playing FreedomOS" on your profile.
@@ -12,11 +12,17 @@ import struct
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from aiohttp import ClientSession, ClientTimeout, web
 
 IS_WIN = sys.platform == "win32"
-PORT = 9333
+PORT = 9343      # the app's private remote-control door (config.json "devtools_port")
+try:
+    import json as _json
+    PORT = int(_json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8")).get("devtools_port", 9343))
+except Exception:
+    pass
 STATE = {"open": False, "connected": False, "voice": None, "users": [], "mute": False, "deaf": False, "msgs": [], "channel": ""}
 on_join = None          # optional hook: called with a name when someone joins your voice channel
 _hub = None

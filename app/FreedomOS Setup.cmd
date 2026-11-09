@@ -125,10 +125,12 @@ if errorlevel 1 (
   echo   Press any key once you're signed in...
   pause >nul
 )
-REM one-time firewall rule for port 7777, ONLY from Tailscale addresses (Windows asks for admin once)
+set "PORT=7777"
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -Command "(Get-Content -Raw '%APP%config.json' | ConvertFrom-Json).port"`) do set "PORT=%%p"
+REM one-time firewall rule for FreedomOS's port, ONLY from Tailscale addresses (Windows asks for admin once)
 if not exist "%APP%firewall_done.txt" (
   echo   Windows will ask for permission once - this lets ONLY your Tailscale devices reach FreedomOS.
-  powershell -NoProfile -Command "Start-Process netsh -Verb RunAs -Wait -ArgumentList 'advfirewall firewall add rule name=FreedomOS-Tailscale-7777 dir=in action=allow protocol=TCP localport=7777 remoteip=100.64.0.0/10'"
+  powershell -NoProfile -Command "Start-Process netsh -Verb RunAs -Wait -ArgumentList 'advfirewall firewall add rule name=FreedomOS-Tailscale-%PORT% dir=in action=allow protocol=TCP localport=%PORT% remoteip=100.64.0.0/10'"
   echo done> "%APP%firewall_done.txt"
 )
 :ts_done

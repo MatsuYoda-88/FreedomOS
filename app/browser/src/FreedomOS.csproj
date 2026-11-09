@@ -5,10 +5,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>F35Browser</AssemblyName>
+    <AssemblyName>FreedomOS</AssemblyName>
     <RootNamespace>F35Browser</RootNamespace>
     <ApplicationIcon>f35browser.ico</ApplicationIcon>
-    <Version>1.0.6</Version>
+    <Version>1.0.1</Version>
     <Product>WiBro</Product>
   </PropertyGroup>
   <ItemGroup>

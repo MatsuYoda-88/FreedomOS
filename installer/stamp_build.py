@@ -15,7 +15,7 @@ for p in sorted(list(SRC.glob("*.cs")) + list(SRC.glob("*.csproj")) + list(SRC.g
     h.update(p.read_bytes())
 want = h.hexdigest()[:12]
 
-if not (BUILDS / "b0" / "F35Browser.exe").exists():
+if not (BUILDS / "b0" / "FreedomOS.exe").exists():
     sys.exit("No WiBro build in app/browser/builds/b0 - run dotnet publish first.")
 (BUILDS / "current.txt").write_text(f"b0 {want}", encoding="utf-8")
 print(f"WiBro build b0 stamped ({want})")

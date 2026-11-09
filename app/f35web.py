@@ -27,6 +27,11 @@ from aiohttp import ClientSession, ClientTimeout, web
 HERE = Path(__file__).resolve().parent
 
 IS_WIN = sys.platform == "win32"
+import json as _json
+try:
+    _DEVTOOLS = int(_json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8")).get("devtools_port", 9343))
+except Exception:
+    _DEVTOOLS = 9343
 D = {}            # boss hands us: web_search, get, html_text, chat, brain_ready, ensure_engine, peers, log, key
 # sites that are all ads, scrapers, content farms or login walls - never worth the click
 JUNK = ("pinterest.", "quora.com", "answers.com", "ask.com", "ehow.com", "wikihow.com/ads", "scribd.com", "coursehero.com",
@@ -224,9 +229,9 @@ _NOWIN = 0x08000000
 
 def _app_running():
     try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq F35Browser.exe", "/NH"], capture_output=True, text=True,
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq FreedomOS.exe", "/NH"], capture_output=True, text=True,
                              creationflags=_NOWIN).stdout
-        return "F35Browser.exe" in out
+        return "FreedomOS.exe" in out
     except Exception:
         return False
 
@@ -250,7 +255,7 @@ async def _media_playing():
     try:
         from aiohttp import ClientSession as CS, ClientTimeout as CT
         async with CS(timeout=CT(total=6)) as s:
-            async with s.get("http://127.0.0.1:9333/json") as r:
+            async with s.get(f"http://127.0.0.1:{_DEVTOOLS}/json") as r:
                 pages = [t for t in await r.json() if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
             for t in pages:
                 try:
@@ -290,7 +295,7 @@ async def _restart_when_idle():
                 playing = False
             if _idle_secs() >= 45 and not playing and not await _media_playing():
                 break
-        await asyncio.to_thread(subprocess.run, ["taskkill", "/IM", "F35Browser.exe", "/F"], capture_output=True, creationflags=_NOWIN)
+        await asyncio.to_thread(subprocess.run, ["taskkill", "/IM", "FreedomOS.exe", "/F"], capture_output=True, creationflags=_NOWIN)
         await asyncio.sleep(1.5)
         exe = f35_browser_exe()
         if exe:
@@ -314,7 +319,7 @@ def _src_hash():
 def _current():
     try:
         name, hsh = (BUILDS / "current.txt").read_text(encoding="utf-8").split()[:2]
-        exe = BUILDS / name / "F35Browser.exe"
+        exe = BUILDS / name / "FreedomOS.exe"
         return (exe if exe.exists() else None), hsh
     except Exception:
         return None, ""
@@ -361,7 +366,7 @@ async def ensure_built(why="startup"):
     """Build WiBro if its code is newer than the last build. Old builds go to todelete. A browser that's open
     keeps running; the new version is what opens next time."""
     log = D.get("log", print)
-    if not IS_WIN or not (BSRC / "F35Browser.csproj").exists() or _build["busy"]:
+    if not IS_WIN or not (BSRC / "FreedomOS.csproj").exists() or _build["busy"]:
         return
     want = await asyncio.to_thread(_src_hash)
     exe, have = _current()
@@ -383,13 +388,13 @@ async def ensure_built(why="startup"):
         out = BUILDS / f"b{int(time.time())}"
         log(f"🌐 WiBro: building the new version ({why})...")
         def run():
-            r = subprocess.run([dn, "publish", str(BSRC / "F35Browser.csproj"), "-c", "Release", "-r", "win-x64",
+            r = subprocess.run([dn, "publish", str(BSRC / "FreedomOS.csproj"), "-c", "Release", "-r", "win-x64",
                                 "--self-contained", "false", "-o", str(out)], capture_output=True, text=True, timeout=900,
                                creationflags=0x08000000)
             (BROWSER / "build.log").write_text((r.stdout or "") + "\n" + (r.stderr or ""), encoding="utf-8")
             return r.returncode
         rc = await asyncio.to_thread(run)
-        if rc != 0 or not (out / "F35Browser.exe").exists():
+        if rc != 0 or not (out / "FreedomOS.exe").exists():
             log("🌐 WiBro: build hit a snag - details in FreedomOS\\browser\\build.log")
             _build["state"] = "build failed"
             return
@@ -420,7 +425,7 @@ def _tidy(keep):
 
 def open_browser(url=""):
     mine = f35_browser_exe()
-    if not mine and (BSRC / "F35Browser.csproj").exists() and IS_WIN:
+    if not mine and (BSRC / "FreedomOS.csproj").exists() and IS_WIN:
         if not _build["busy"]:
             try:
                 asyncio.get_running_loop().create_task(ensure_built("you opened it"))

@@ -431,6 +431,7 @@ Updates never overwrite your config.json.
 | `remote_watch` | `false` = never listen on Tailscale, even if it's installed |
 | `discord_app_id` | for the "Playing FreedomOS" status ([section 13](#playing-freedomos-status-optional)) |
 | `port` | FreedomOS's address on your PC (`7777`) |
+| `engine_port`, `devtools_port` | the brain engine's port (`8080`) and the app window's private remote-control port (`9343`) - change all three if something else on your PC already uses them |
 
 ---
 
