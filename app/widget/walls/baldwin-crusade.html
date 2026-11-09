@@ -1,0 +1,651 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Baldwin's Crusade</title>
+<style>html,body{margin:0;height:100%;background:#1c0e0a;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* Baldwin's Crusade — the Leper King leads the stickman host toward Jerusalem at sunset.
+   Built for 4K @ 120Hz: everything is time-based, static layers are cached, and each rank
+   of the army is drawn in a handful of batched paths. */
+'use strict';
+const c = document.getElementById('c');
+const x = c.getContext('2d', { alpha: false });
+
+// ------------------------------------------------------------------ helpers
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function hex(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function mixc(a, b, t) {
+  const A = hex(a), B = hex(b);
+  return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+function off(w, h) { const o = document.createElement('canvas'); o.width = Math.max(1, Math.ceil(w)); o.height = Math.max(1, Math.ceil(h)); return o; }
+
+const SIL = '#1c0e0a', HAZE = '#c8693e';
+const COL = {
+  templar: '#efe3cf', templarX: '#b3191c',
+  hosp: '#1f1818', hospX: '#efe3cf',
+  plain: ['#5a2e1f', '#3b3b55', '#6b5a2a', '#4a3a2c'], plainX: '#a31a1a',
+  gold: '#e0ae3a', royal: '#22357a', silver: '#d4d7dc',
+};
+
+let W, H, U, horizon, V;            // V = march speed (px/s at depth 1)
+let skyC, farDunes, midDunes, ripA, ripB, ripC, fore, vign, dustSprite;
+let ranks = [], front = [], birds = [], dustMid = [], dustFront = [], clouds = [];
+let scroll = 0;                      // distance marched at depth 1
+
+// ------------------------------------------------------------------ batched drawing
+// Every rank is drawn as a few big Path2D objects (one per colour/stroke width) instead of
+// thousands of tiny draw calls. That is what keeps 4K at 120fps.
+const ORDER = ['hLegFar', 'hTail', 'hBody', 'hNeck', 'hHead', 'hLeg', 'cloak', 'capa', 'capaX', 'limb', 'pole',
+  'tab', 'tabX', 'head', 'mask', 'maskEye', 'crown', 'shield', 'shieldX', 'metal', 'sword'];
+const RIMKEYS = ['hTail', 'hBody', 'hNeck', 'hHead', 'hLeg', 'cloak', 'capa', 'limb', 'pole', 'tab', 'head', 'shield'];
+
+class Batch {
+  constructor() { this.m = new Map(); this.flags = []; }
+  s(key, lw, color) { return this.get(key, 's', lw, color); }
+  f(key, color) { return this.get(key, 'f', 0, color); }
+  get(key, mode, lw, color) {
+    let b = this.m.get(key);
+    if (!b) { b = { p: new Path2D(), mode, lw, color }; this.m.set(key, b); }
+    return b.p;
+  }
+  flush(rim) {
+    const draw = (b, col) => {
+      if (b.mode === 's') { x.strokeStyle = col; x.lineWidth = b.lw; x.stroke(b.p); }
+      else { x.fillStyle = col; x.fill(b.p); }
+    };
+    if (rim) {
+      x.save(); x.translate(rim.dx, rim.dy);
+      for (const pre of RIMKEYS) for (const [k, b] of this.m) if (k === pre || k.startsWith(pre + ':')) draw(b, rim.col);
+      x.restore();
+    }
+    for (const pre of ORDER) for (const [k, b] of this.m) if (k === pre || k.startsWith(pre + ':')) draw(b, b.color);
+  }
+}
+function seg(p, ...pts) { p.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) p.lineTo(pts[i], pts[i + 1]); }
+function poly(p, pts) { p.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) p.lineTo(pts[i], pts[i + 1]); p.closePath(); }
+function circ(p, cx, cy, r) { p.moveTo(cx + r, cy); p.arc(cx, cy, r, 0, TAU); }
+function ell(p, cx, cy, rx, ry, rot, a0, a1) {   // lift the pen first so batched shapes never join up
+  p.moveTo(cx + rx * Math.cos(a0) * Math.cos(rot) - ry * Math.sin(a0) * Math.sin(rot), cy + rx * Math.cos(a0) * Math.sin(rot) + ry * Math.sin(a0) * Math.cos(rot));
+  p.ellipse(cx, cy, rx, ry, rot, a0, a1);
+}
+
+// ------------------------------------------------------------------ rank colours
+function rankStyle(s) {
+  const f = clamp((1 - s) * 0.95, 0, 0.7);
+  const tint = col => mixc(mixc(col, SIL, 0.28), HAZE, f);
+  return {
+    s, h: 170 * U * s, f,
+    sil: mixc(SIL, HAZE, f), silFar: mixc(mixc(SIL, '#000000', 0.25), HAZE, f),
+    rim: mixc('#ffb763', HAZE, f * 0.7), metal: mixc('#8a7a6e', HAZE, f),
+    tint, rimOn: s > 0.45,
+  };
+}
+
+// ------------------------------------------------------------------ the soldiers
+function shieldShape(B, cx, cy, w, hh, col, xcol, cross) {
+  poly(B.f('shield:' + col, col), [cx - w / 2, cy - hh / 2, cx + w / 2, cy - hh / 2, cx + w / 2, cy + hh * 0.05, cx, cy + hh / 2, cx - w / 2, cy + hh * 0.05]);
+  if (cross) {
+    const p = B.f('shieldX:' + xcol, xcol);
+    p.rect(cx - w * 0.1, cy - hh * 0.42, w * 0.2, hh * 0.78);
+    p.rect(cx - w * 0.42, cy - hh * 0.2, w * 0.84, hh * 0.17);
+  }
+}
+function tabard(B, u, rk, nx, ny, hipX, hipY, h, low) {
+  if (!u.tab) return;
+  const col = rk.tint(u.tab);
+  poly(B.f('tab:' + col, col), [nx - 0.055 * h, ny + 0.03 * h, nx + 0.055 * h, ny + 0.03 * h, hipX + 0.075 * h, hipY + low * h, hipX - 0.075 * h, hipY + low * h]);
+  if (u.tabX && rk.s > 0.33) {
+    const xc = rk.tint(u.tabX), cx = (nx + hipX) / 2, p = B.f('tabX:' + xc, xc);
+    p.rect(cx - 0.014 * h, ny + 0.05 * h, 0.028 * h, hipY - ny + 0.02 * h);
+    p.rect(cx - 0.047 * h, ny + 0.1 * h, 0.094 * h, 0.026 * h);
+  }
+}
+function headgear(B, u, rk, hx, hy, h) {
+  const p = B.f('head', rk.sil), r = 0.072 * h;
+  if (u.helm === 'great') { p.rect(hx - r * 0.95, hy - r * 1.1, r * 1.9, r * 2.05); }
+  else {
+    circ(p, hx, hy, r);
+    if (u.helm === 'nasal') poly(p, [hx - r * 0.9, hy - r * 0.3, hx, hy - r * 1.75, hx + r * 0.9, hy - r * 0.3]);
+    if (u.helm === 'kettle') ell(p, hx, hy - r * 0.45, r * 1.55, r * 0.32, 0, 0, TAU);
+  }
+}
+function spearTip(B, rk, x0, y0, x1, y1, h, len) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+  poly(B.f('metal', rk.metal), [x1 + ux * len, y1 + uy * len, x1 - uy * 0.02 * h, y1 + ux * 0.02 * h, x1 + uy * 0.02 * h, y1 - ux * 0.02 * h]);
+}
+function swingArm(p, sx, sy, ang, h) {
+  const ex = sx + Math.sin(ang) * 0.15 * h, ey = sy + Math.cos(ang) * 0.15 * h;
+  seg(p, sx, sy, ex, ey, ex + Math.sin(ang + 0.35) * 0.14 * h, ey + Math.cos(ang + 0.35) * 0.14 * h);
+}
+
+function footSoldier(B, u, X, gy, rk, t) {
+  const h = rk.h * (u.k || 1), ph = u.ph, s = Math.sin(ph), cs = Math.cos(ph);
+  const limb = B.s('limb', 0.056 * h, rk.sil);
+  const hipX = X, hipY = gy - 0.455 * h - 0.03 * h * Math.abs(cs);
+  for (const [a, bend] of [[0.42 * s, Math.max(0, cs) * 0.75], [-0.42 * s, Math.max(0, -cs) * 0.75]]) {
+    const kx = hipX + Math.sin(a) * 0.245 * h, ky = hipY + Math.cos(a) * 0.245 * h;
+    seg(limb, hipX, hipY, kx, ky, kx + Math.sin(a - bend) * 0.245 * h, ky + Math.cos(a - bend) * 0.245 * h);
+  }
+  const nx = hipX + 0.035 * h, ny = hipY - 0.29 * h, hx = nx + 0.012 * h, hy = ny - 0.085 * h;
+  seg(limb, hipX, hipY, nx, ny);
+  const sy = ny + 0.02 * h, pole = B.s('pole', 0.02 * h, rk.sil);
+
+  if (u.type === 'spear') {
+    swingArm(limb, nx, sy, -0.35 * s, h);
+    const hx2 = nx + 0.1 * h, hy2 = ny + 0.08 * h;
+    seg(limb, nx, sy, nx + 0.07 * h, ny + 0.14 * h, hx2, hy2);
+    const x0 = hx2 - 0.03 * h, y0 = hy2 + 0.36 * h, x1 = hx2 + 0.09 * h, y1 = hy2 - 0.9 * h;
+    seg(pole, x0, y0, x1, y1); spearTip(B, rk, x0, y0, x1, y1, h, 0.08 * h);
+  } else if (u.type === 'knight') {
+    swingArm(limb, nx, sy, 0.3 * s, h);
+    seg(limb, nx, sy, nx + 0.06 * h, ny + 0.15 * h, nx + 0.1 * h, ny + 0.17 * h);
+    seg(pole, hipX + 0.02 * h, hipY - 0.03 * h, hipX - 0.2 * h, hipY + 0.16 * h);
+  } else if (u.type === 'archer') {
+    swingArm(limb, nx, sy, 0.35 * s, h); swingArm(limb, nx, sy, -0.35 * s, h);
+    ell(pole, nx - 0.04 * h, ny + 0.13 * h, 0.24 * h, 0.05 * h, -1.15, 0.1, Math.PI - 0.1);
+    for (let i = 0; i < 3; i++) seg(pole, nx - 0.07 * h + i * 0.012 * h, ny + 0.14 * h, nx - 0.14 * h + i * 0.012 * h, ny - 0.06 * h);
+  } else if (u.type === 'banner') {
+    swingArm(limb, nx, sy, -0.35 * s, h);
+    const px = nx + 0.09 * h, py = ny + 0.06 * h;
+    seg(limb, nx, sy, nx + 0.06 * h, ny + 0.13 * h, px, py);
+    const top = py - 1.05 * h;
+    seg(pole, px, py + 0.42 * h, px, top);
+    B.flags.push({ x: px, y: top + 0.02 * h, len: 0.48 * h, ht: 0.3 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.1 });
+  }
+  tabard(B, u, rk, nx, ny, hipX, hipY, h, 0.12);
+  if (u.type === 'knight') shieldShape(B, nx + 0.11 * h, ny + 0.2 * h, 0.16 * h, 0.23 * h, rk.tint(u.shield), rk.tint(u.shieldX), rk.s > 0.33);
+  headgear(B, u, rk, hx, hy, h);
+}
+
+function horse(B, u, X, gy, rk, t, h, col, colFar) {
+  const ph = u.ph, bob = 0.018 * h * Math.abs(Math.sin(ph * 2));
+  const bx = X, by = gy - 0.5 * h - bob;
+  for (const [lx, o, far] of [[0.22, 0.75, 1], [-0.3, 0.5, 1], [0.25, 0.25, 0], [-0.27, 0, 0]]) {
+    const q = ph + o * TAU, a = 0.36 * Math.sin(q), bend = Math.max(0, Math.cos(q)) * 0.9;
+    const tx = bx + lx * h, ty = by + 0.06 * h;
+    const kx = tx + Math.sin(a) * 0.22 * h, ky = ty + Math.cos(a) * 0.22 * h;
+    seg(far ? B.s('hLegFar:' + colFar, 0.05 * h, colFar) : B.s('hLeg:' + col, 0.052 * h, col),
+      tx, ty, kx, ky, kx + Math.sin(a - bend) * 0.22 * h, ky + Math.cos(a - bend) * 0.22 * h);
+  }
+  const nod = 0.025 * h * Math.sin(ph * 2), sway = 0.04 * h * Math.sin(t * 0.0021 + u.fo);
+  seg(B.s('hBody:' + col, 0.25 * h, col), bx - 0.3 * h, by, bx + 0.24 * h, by - 0.02 * h);
+  seg(B.s('hNeck:' + col, 0.12 * h, col), bx + 0.2 * h, by - 0.05 * h, bx + 0.38 * h, by - 0.3 * h + nod);
+  seg(B.s('hHead:' + col, 0.09 * h, col), bx + 0.38 * h, by - 0.3 * h + nod, bx + 0.53 * h, by - 0.19 * h + nod);
+  poly(B.f('hHead:e' + col, col), [bx + 0.35 * h, by - 0.33 * h + nod, bx + 0.37 * h, by - 0.42 * h + nod, bx + 0.4 * h, by - 0.33 * h + nod]);
+  const tail = B.s('hTail:' + col, 0.045 * h, col);
+  tail.moveTo(bx - 0.4 * h, by - 0.05 * h); tail.quadraticCurveTo(bx - 0.52 * h + sway, by + 0.04 * h, bx - 0.5 * h + sway * 1.5, by + 0.3 * h);
+  return { bx, by, nod };
+}
+
+function caparison(B, u, rk, bx, by, h, t, col, xcol) {
+  const pts = [bx - 0.42 * h, by - 0.11 * h, bx + 0.3 * h, by - 0.12 * h, bx + 0.36 * h, by + 0.2 * h];
+  for (let i = 0; i <= 8; i++) {
+    const k = i / 8, xx = bx + 0.36 * h - k * 0.8 * h;
+    pts.push(xx, by + 0.2 * h + Math.sin(k * 9 + t * 0.006 + u.fo) * 0.016 * h + k * 0.02 * h);
+  }
+  poly(B.f('capa:' + col, col), pts);
+  if (xcol && rk.s > 0.33) {
+    const p = B.f('capaX:' + xcol, xcol);
+    p.rect(bx - 0.08 * h, by - 0.08 * h, 0.05 * h, 0.26 * h);
+    p.rect(bx - 0.17 * h, by + 0.01 * h, 0.23 * h, 0.05 * h);
+  }
+}
+
+function mounted(B, u, X, gy, rk, t) {
+  const h = rk.h * (u.k || 1);
+  const hc = u.horse ? rk.tint(u.horse) : rk.sil, hcFar = u.horse ? mixc(hc, SIL, 0.35) : rk.silFar;
+  const { bx, by, nod } = horse(B, u, X, gy, rk, t, h, hc, hcFar);
+  if (u.capa) caparison(B, u, rk, bx, by, h, t, rk.tint(u.capa), u.capaX ? rk.tint(u.capaX) : null);
+
+  const limb = B.s('limb', 0.056 * h, rk.sil), pole = B.s('pole', 0.021 * h, rk.sil);
+  const hipX = bx - 0.04 * h, hipY = by - 0.14 * h, nx = bx - 0.005 * h, ny = by - 0.44 * h;
+  const hx = nx + 0.01 * h, hy = ny - 0.085 * h;
+
+  if (u.king) {   // Baldwin's royal cloak streams out behind him
+    const cl = B.f('cloak', rk.tint(COL.royal)), pts = [nx - 0.03 * h, ny + 0.01 * h];
+    for (let i = 0; i <= 10; i++) {
+      const k = i / 10;
+      pts.push(nx - 0.03 * h - k * 0.55 * h, ny + 0.02 * h + k * 0.2 * h + Math.sin(k * 7 - t * 0.007) * 0.04 * h * k);
+    }
+    pts.push(hipX - 0.42 * h, hipY + 0.06 * h, hipX + 0.02 * h, hipY);
+    poly(cl, pts);
+  }
+  seg(limb, hipX, hipY, bx + 0.12 * h, by - 0.04 * h, bx + 0.08 * h, by + 0.16 * h);
+  seg(limb, hipX, hipY, nx, ny);
+  seg(limb, nx, ny + 0.02 * h, nx + 0.1 * h, ny + 0.16 * h, nx + 0.2 * h, ny + 0.18 * h);   // rein arm
+  seg(pole, nx + 0.2 * h, ny + 0.18 * h, bx + 0.48 * h, by - 0.23 * h + nod);
+
+  if (u.king) {   // sword raised toward Jerusalem
+    const hx2 = nx + 0.13 * h, hy2 = ny + 0.03 * h;
+    seg(limb, nx, ny + 0.02 * h, nx + 0.08 * h, ny + 0.13 * h, hx2, hy2);
+    const sw = B.s('sword', 0.022 * h, rk.tint(COL.silver));
+    const tx = hx2 + 0.27 * h, ty = hy2 - 0.52 * h;
+    seg(sw, hx2, hy2, tx, ty);
+    seg(B.s('pole', 0.021 * h, rk.sil), hx2 - 0.05 * h, hy2 - 0.02 * h, hx2 + 0.055 * h, hy2 + 0.035 * h);
+    u.glint = [tx, ty];
+  } else {
+    const hx2 = nx + 0.1 * h, hy2 = ny + 0.12 * h;
+    seg(limb, nx, ny + 0.02 * h, nx + 0.06 * h, ny + 0.17 * h, hx2, hy2);
+    const x0 = hx2 - 0.06 * h, y0 = hy2 + 0.4 * h, x1 = hx2 + (u.big ? 0.04 : 0.16) * h, y1 = hy2 - (u.big ? 1.55 : 1.15) * h;
+    seg(pole, x0, y0, x1, y1);
+    if (u.big) B.flags.push({ x: x1, y: y1 + 0.03 * h, len: 0.78 * h, ht: 0.48 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.06, big: true });
+    else {
+      spearTip(B, rk, x0, y0, x1, y1, h, 0.07 * h);
+      B.flags.push({ x: x1 - 0.005 * h, y: y1 + 0.04 * h, len: 0.3 * h, ht: 0.11 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.85 });
+    }
+  }
+  tabard(B, u, rk, nx, ny, hipX, hipY, h, 0.14);
+  if (u.shield) shieldShape(B, bx - 0.02 * h, by - 0.22 * h, 0.15 * h, 0.22 * h, rk.tint(u.shield), rk.tint(u.shieldX), rk.s > 0.33);
+
+  if (u.king) {   // the silver mask and the crown of Jerusalem
+    const r = 0.075 * h;
+    circ(B.f('mask', rk.tint(COL.silver)), hx, hy, r);
+    const e = B.f('maskEye', '#120808');
+    e.rect(hx - r * 0.15, hy - r * 0.28, r * 0.42, r * 0.17); e.rect(hx + r * 0.42, hy - r * 0.28, r * 0.38, r * 0.17);
+    e.rect(hx + r * 0.25, hy + r * 0.32, r * 0.5, r * 0.09);
+    const g = rk.tint(COL.gold), cr = B.f('crown', g), by0 = hy - r * 0.75, top = by0 - r * 0.85;
+    poly(cr, [hx - r * 1.02, by0 + r * 0.25, hx - r * 1.02, top, hx - r * 0.6, by0 - r * 0.25, hx - r * 0.25, top - r * 0.15,
+      hx + r * 0.08, by0 - r * 0.25, hx + r * 0.45, top - r * 0.15, hx + r * 0.75, by0 - r * 0.25, hx + r * 1.05, top, hx + r * 1.05, by0 + r * 0.25]);
+  } else headgear(B, u, rk, hx, hy, h);
+}
+
+// ------------------------------------------------------------------ flags
+function flagPts(fl, t, u0, v0, u1, v1, n) {
+  const pts = [], F = (u, v) => {
+    const ph = u * 6.2 - t * 0.0058 + fl.o;
+    const w = Math.sin(ph) * fl.ht * 0.17 * u + u * fl.ht * 0.06;
+    const xx = fl.x - fl.len * u * (0.93 + 0.07 * Math.cos(ph));
+    const top = (1 - (1 - fl.taper) * 0) , taperH = fl.ht * (1 - fl.taper * u);
+    return [xx, fl.y + w + v * taperH];
+  };
+  for (let i = 0; i <= n; i++) pts.push(...F(u0 + (u1 - u0) * i / n, v0));
+  for (let i = n; i >= 0; i--) pts.push(...F(u0 + (u1 - u0) * i / n, v1));
+  return pts;
+}
+const DESIGNS = {
+  jerusalem: [['#efe6d6', 0, 0, 1, 1], ['G', .44, .15, .56, .85], ['G', .25, .44, .75, .56], ['G', .38, .15, .62, .22], ['G', .38, .78, .62, .85],
+    ['G', .25, .37, .31, .63], ['G', .69, .37, .75, .63],
+    ['G', .31, .2, .35, .34], ['G', .27, .25, .39, .29], ['G', .65, .2, .69, .34], ['G', .61, .25, .73, .29],
+    ['G', .31, .66, .35, .8], ['G', .27, .71, .39, .75], ['G', .65, .66, .69, .8], ['G', .61, .71, .73, .75]],
+  beauseant: [['#1f1818', 0, 0, 1, .5], ['#efe3cf', 0, .5, 1, 1]],
+  hosp: [['#a3161a', 0, 0, 1, 1], ['#efe3cf', .43, 0, .57, 1], ['#efe3cf', 0, .4, 1, .6]],
+  templar: [['#efe3cf', 0, 0, 1, 1], ['#b3191c', .42, 0, .58, 1], ['#b3191c', 0, .38, 1, .62]],
+  red: [['#9e1b1b', 0, 0, 1, 1], ['#e0ae3a', 0, .4, 1, .6]],
+};
+function drawFlags(list, t) {
+  for (const fl of list) {
+    const n = fl.big ? 14 : (fl.f > 0.45 ? 4 : 8);
+    for (const [col, u0, v0, u1, v1] of DESIGNS[fl.d]) {
+      const cc = col === 'G' ? COL.gold : col;
+      x.fillStyle = mixc(mixc(cc, SIL, 0.18), HAZE, fl.f);
+      const p = flagPts(fl, t, u0, v0, u1, v1, n);
+      x.beginPath(); x.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) x.lineTo(p[i], p[i + 1]); x.closePath(); x.fill();
+    }
+    // light and shadow across the ripples — the sun is behind the cloth
+    for (let i = 0; i < n; i++) {
+      const u0 = i / n, u1 = (i + 1) / n, sl = Math.cos(((u0 + u1) / 2) * 6.2 - t * 0.0058 + fl.o);
+      x.fillStyle = sl > 0 ? `rgba(255,190,110,${0.22 * sl * (1 - fl.f)})` : `rgba(20,6,4,${-0.35 * sl})`;
+      const p = flagPts(fl, t, u0, 0, u1, 1, 1);
+      x.beginPath(); x.moveTo(p[0], p[1]); for (let k = 2; k < p.length; k += 2) x.lineTo(p[k], p[k + 1]); x.closePath(); x.fill();
+    }
+  }
+}
+
+// ------------------------------------------------------------------ army generation
+const FACTIONS = ['templar', 'templar', 'hosp', 'plain', 'plain', 'plain', 'plain'];
+function makeUnit(isFront) {
+  const r = Math.random();
+  const type = r < 0.34 ? 'spear' : r < 0.52 ? 'knight' : r < 0.66 ? 'archer' : r < 0.74 ? 'banner' : 'mounted';
+  const fac = pick(FACTIONS);
+  const u = { type, fac, ph: rnd(0, TAU), fo: rnd(0, TAU), k: rnd(0.94, 1.06) };
+  if (fac === 'templar') { u.tab = COL.templar; u.tabX = COL.templarX; u.shield = COL.templar; u.shieldX = COL.templarX; u.flag = type === 'banner' ? 'beauseant' : 'templar'; }
+  else if (fac === 'hosp') { u.tab = COL.hosp; u.tabX = COL.hospX; u.shield = COL.hosp; u.shieldX = COL.hospX; u.flag = 'hosp'; }
+  else { u.tab = type === 'archer' ? pick(COL.plain) : pick(COL.plain); u.tabX = type === 'archer' ? null : COL.plainX; u.shield = pick(['#7a1d1d', '#2d3d6b', '#b48a2c']); u.shieldX = '#e8dccb'; u.flag = pick(['jerusalem', 'red', 'red']); }
+  if (type === 'mounted') {
+    if (fac !== 'plain') { u.capa = u.tab; u.capaX = u.tabX; }
+    u.helm = fac === 'plain' ? 'nasal' : 'great';
+  } else u.helm = type === 'knight' ? (fac === 'plain' ? 'nasal' : 'great') : type === 'spear' ? pick(['kettle', 'nasal', 'kettle']) : type === 'archer' ? 'hood' : 'nasal';
+  return u;
+}
+function makeRank(y, s, drift) {
+  const rk = rankStyle(s), units = [], margin = 1.4 * rk.h;
+  let px = -margin;
+  while (px < W + margin) {
+    const u = makeUnit();
+    u.x = px; units.push(u);
+    px += rk.h * (u.type === 'mounted' ? rnd(0.95, 1.25) : rnd(0.36, 0.62));
+  }
+  return { y, s, drift: drift * U, rk, units, span: px + margin, margin };
+}
+function makeFront() {
+  const list = [
+    { at: 0.06, gy: 0.928, s: 0.86, u: Object.assign(makeUnit(), { type: 'spear', fac: 'plain', tab: '#5a2e1f', tabX: COL.plainX, helm: 'kettle' }) },
+    { at: 0.17, gy: 0.905, s: 0.9, u: { type: 'mounted', fac: 'hosp', tab: COL.hosp, tabX: COL.hospX, capa: COL.hosp, capaX: COL.hospX, shield: COL.hosp, shieldX: COL.hospX, helm: 'great', flag: 'hosp', horse: '#3a2418' } },
+    { at: 0.275, gy: 0.915, s: 0.95, u: { type: 'mounted', big: true, fac: 'plain', tab: '#2d3d6b', tabX: COL.gold, helm: 'nasal', flag: 'jerusalem', horse: '#4a2c1c' } },
+    { at: 0.535, gy: 0.922, s: 0.95, u: { type: 'mounted', big: true, fac: 'templar', tab: COL.templar, tabX: COL.templarX, capa: COL.templar, capaX: COL.templarX, shield: COL.templar, shieldX: COL.templarX, helm: 'great', flag: 'beauseant' } },
+    { at: 0.64, gy: 0.94, s: 0.9, u: Object.assign(makeUnit(), { type: 'knight', fac: 'templar', tab: COL.templar, tabX: COL.templarX, shield: COL.templar, shieldX: COL.templarX, helm: 'great' }) },
+    { at: 0.395, gy: 0.945, s: 1.08, u: { type: 'mounted', king: true, fac: 'king', tab: '#e4d8c6', tabX: COL.gold, capa: '#ece2d2', capaX: COL.gold, horse: '#e9ddd0', helm: 'none' } },
+  ];
+  for (const e of list) { e.u.ph = rnd(0, TAU); e.u.fo = rnd(0, TAU); e.u.k = 1; }
+  return list.sort((a, b) => a.gy - b.gy);
+}
+
+// ------------------------------------------------------------------ static scenery
+function buildSky() {
+  skyC = off(W, H); const g = skyC.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#2a1240'); sky.addColorStop(0.32, '#6b2443'); sky.addColorStop(0.6, '#c6483a');
+  sky.addColorStop(0.82, '#f08a3a'); sky.addColorStop(1, '#ffc35c');
+  g.fillStyle = sky; g.fillRect(0, 0, W, horizon + 2);
+  for (let i = 0; i < 90; i++) {   // first evening stars
+    g.globalAlpha = rnd(0.15, 0.6) * (1 - i / 120); g.fillStyle = '#fff1dd';
+    const s = rnd(0.6, 1.6) * U; g.fillRect(rnd(0, W), rnd(0, horizon * 0.22), s, s);
+  }
+  g.globalAlpha = 1;
+  const sx = W * 0.83, sy = horizon - 0.055 * H, sr = 0.072 * H;
+  let glow = g.createRadialGradient(sx, sy, sr * 0.5, sx, sy, sr * 9);
+  glow.addColorStop(0, 'rgba(255,214,140,0.85)'); glow.addColorStop(0.25, 'rgba(255,150,70,0.35)'); glow.addColorStop(1, 'rgba(255,120,60,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, W, horizon);
+  // long sunset cloud streaks, lit from underneath
+  for (let i = 0; i < 9; i++) {
+    const cy = rnd(0.16, 0.45) * H, cx = rnd(0, W), cw = rnd(0.18, 0.45) * W, ch = rnd(5, 13) * U;
+    const cg = g.createLinearGradient(0, cy - ch, 0, cy + ch);
+    cg.addColorStop(0, 'rgba(120,40,70,0)'); cg.addColorStop(0.6, 'rgba(255,140,90,0.28)'); cg.addColorStop(1, 'rgba(255,200,120,0.45)');
+    g.fillStyle = cg; g.beginPath(); g.ellipse(cx, cy, cw / 2, ch, 0, 0, TAU); g.fill();
+  }
+  g.fillStyle = '#fff0c4'; g.beginPath(); g.arc(sx, sy, sr, 0, TAU); g.fill();
+  glow = g.createRadialGradient(sx, sy, sr * 0.2, sx, sy, sr * 1.25);
+  glow.addColorStop(0, 'rgba(255,255,235,1)'); glow.addColorStop(0.75, 'rgba(255,224,150,0.9)'); glow.addColorStop(1, 'rgba(255,190,90,0)');
+  g.fillStyle = glow; g.beginPath(); g.arc(sx, sy, sr * 1.25, 0, TAU); g.fill();
+
+  drawJerusalem(g);
+
+  const ground = g.createLinearGradient(0, horizon, 0, H);
+  ground.addColorStop(0, '#d98c4c'); ground.addColorStop(0.08, '#b9653a'); ground.addColorStop(0.45, '#7a3a22'); ground.addColorStop(1, '#3a1910');
+  g.fillStyle = ground; g.fillRect(0, horizon, W, H - horizon);
+  const glare = g.createRadialGradient(sx, horizon, 0, sx, horizon, 0.45 * W);
+  glare.addColorStop(0, 'rgba(255,200,120,0.55)'); glare.addColorStop(1, 'rgba(255,170,90,0)');
+  g.save(); g.translate(sx, horizon); g.scale(1, 0.18); g.translate(-sx, -horizon);
+  g.fillStyle = glare; g.fillRect(0, horizon, W, H); g.restore();
+}
+
+function drawJerusalem(g) {
+  const col = '#4a2230', base = horizon - 0.012 * H;
+  // the hill the city sits on
+  g.fillStyle = mixc(col, '#c8693e', 0.25);
+  g.beginPath(); g.moveTo(0.68 * W, horizon + 1);
+  g.bezierCurveTo(0.72 * W, base - 0.006 * H, 0.95 * W, base - 0.012 * H, 1.0 * W, horizon - 0.004 * H);
+  g.lineTo(W, horizon + 1); g.closePath(); g.fill();
+  g.fillStyle = col;
+  const wy = base - 0.004 * H, x0 = 0.725 * W, x1 = 0.975 * W, wh = 0.017 * H;
+  // houses behind the wall
+  for (let i = 0; i < 70; i++) {
+    const bx = rnd(x0, x1), bw = rnd(0.004, 0.012) * W, bh = rnd(0.012, 0.03) * H;
+    g.fillRect(bx, wy - bh, bw, bh);
+    if (Math.random() < 0.25) { g.beginPath(); g.arc(bx + bw / 2, wy - bh, bw * 0.38, Math.PI, 0); g.fill(); }
+  }
+  // Church of the Holy Sepulchre
+  domeAt(g, 0.795 * W, wy - 0.034 * H, 0.0065 * W, 0.012 * H, col, false);
+  g.fillRect(0.785 * W, wy - 0.034 * H, 0.02 * W, 0.034 * H);
+  g.fillRect(0.808 * W, wy - 0.05 * H, 0.004 * W, 0.05 * H);
+  // Dome of the Rock, right in front of the setting sun
+  const dx = 0.845 * W;
+  g.fillRect(dx - 0.02 * W, wy - 0.03 * H, 0.04 * W, 0.03 * H);
+  g.fillRect(dx - 0.012 * W, wy - 0.04 * H, 0.024 * W, 0.012 * H);
+  domeAt(g, dx, wy - 0.04 * H, 0.0125 * W, 0.024 * H, col, true);
+  g.fillRect(dx - 0.0007 * W, wy - 0.073 * H, 0.0014 * W, 0.01 * H);
+  // Tower of David
+  g.fillRect(0.74 * W, wy - 0.06 * H, 0.012 * W, 0.06 * H);
+  crenels(g, 0.74 * W, 0.752 * W, wy - 0.06 * H, 0.0025 * W);
+  // city wall with towers
+  g.fillRect(x0, wy - wh, x1 - x0, wh + 0.006 * H);
+  crenels(g, x0, x1, wy - wh, 0.003 * W);
+  for (let tx = x0; tx < x1; tx += rnd(0.018, 0.03) * W) {
+    g.fillRect(tx, wy - wh * 1.7, 0.007 * W, wh * 1.7);
+    crenels(g, tx, tx + 0.007 * W, wy - wh * 1.7, 0.0022 * W);
+  }
+  // cypress trees on the slope
+  g.fillStyle = mixc(col, '#000', 0.2);
+  for (let i = 0; i < 14; i++) { const cx = rnd(0.69, 0.99) * W, ch = rnd(0.012, 0.028) * H; g.beginPath(); g.ellipse(cx, wy + 0.004 * H - ch / 2, 0.0018 * W, ch / 2, 0, 0, TAU); g.fill(); }
+}
+function crenels(g, a, b, y, step) { for (let px = a; px < b - step * 0.4; px += step) g.fillRect(px, y - step * 0.55, step * 0.55, step * 0.55); }
+function domeAt(g, cx, cy, rx, ry, col, gold) {
+  if (gold) {
+    const dg = g.createLinearGradient(cx - rx, 0, cx + rx, 0);
+    dg.addColorStop(0, '#6a3a22'); dg.addColorStop(0.7, '#9b6a2c'); dg.addColorStop(1, '#ffd67a');
+    g.fillStyle = dg;
+  }
+  g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, Math.PI, 0); g.fill();
+  if (gold) { g.strokeStyle = 'rgba(255,225,150,0.9)'; g.lineWidth = 1.4 * U; g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, -Math.PI / 2, 0); g.stroke(); }
+  g.fillStyle = col;
+}
+
+// seamless dune strip: heights are sums of sines whose periods divide the tile width
+function duneTile(w, top, bottom, amp, harmonics, fill, ridge, ridgeW) {
+  const o = off(w, bottom - top + 2), g = o.getContext('2d'), N = 260, hs = [];
+  const ph = harmonics.map(() => rnd(0, TAU));
+  for (let i = 0; i <= N; i++) {
+    let v = 0; harmonics.forEach((k, j) => v += Math.sin(i / N * TAU * k + ph[j]) / (j + 1));
+    hs.push((bottom - top) - amp * (0.55 + 0.45 * v));
+  }
+  g.fillStyle = fill; g.beginPath(); g.moveTo(0, o.height);
+  hs.forEach((y, i) => g.lineTo(i / N * w, y)); g.lineTo(w, o.height); g.closePath(); g.fill();
+  if (ridge) {
+    g.strokeStyle = ridge; g.lineWidth = ridgeW; g.beginPath();
+    hs.forEach((y, i) => i ? g.lineTo(i / N * w, y + ridgeW / 2) : g.moveTo(0, y + ridgeW / 2)); g.stroke();
+  }
+  return { c: o, top, w };
+}
+function rippleTile(top, bottom, count, light, dark) {
+  const o = off(W, bottom - top), g = o.getContext('2d'), bh = bottom - top;
+  g.lineCap = 'round';
+  for (let i = 0; i < count; i++) {
+    const yy = rnd(0, bh), k = 0.4 + (top + yy - horizon) / (H - horizon), w = rnd(14, 60) * U * k, xx = rnd(0, W);
+    for (const dx of [0, -W, W]) {
+      g.strokeStyle = dark; g.lineWidth = 1.6 * U * k;
+      g.beginPath(); g.moveTo(xx + dx, yy + 1.2 * U * k); g.quadraticCurveTo(xx + dx + w / 2, yy - 3 * U * k, xx + dx + w, yy + 1.2 * U * k); g.stroke();
+      g.strokeStyle = light; g.lineWidth = 1.1 * U * k;
+      g.beginPath(); g.moveTo(xx + dx, yy); g.quadraticCurveTo(xx + dx + w / 2, yy - 4 * U * k, xx + dx + w, yy); g.stroke();
+    }
+  }
+  return { c: o, top, w: W };
+}
+function foreTile() {
+  const w = W * 2, top = 0.86 * H, o = off(w, H - top), g = o.getContext('2d'), bh = H - top, N = 400, hs = [];
+  const ph = [rnd(0, TAU), rnd(0, TAU), rnd(0, TAU)];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const hump = Math.pow(Math.max(0, Math.sin(u * TAU * 2 + ph[0])), 3);
+    hs.push(bh - (0.025 * H + hump * 0.07 * H + Math.sin(u * TAU * 7 + ph[1]) * 0.006 * H));
+  }
+  const fg = g.createLinearGradient(0, 0, 0, bh);
+  fg.addColorStop(0, '#3a1a10'); fg.addColorStop(1, '#170a06');
+  g.fillStyle = fg; g.beginPath(); g.moveTo(0, bh);
+  hs.forEach((y, i) => g.lineTo(i / N * w, y)); g.lineTo(w, bh); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(255,170,90,0.55)'; g.lineWidth = 2 * U; g.beginPath();
+  hs.forEach((y, i) => i ? g.lineTo(i / N * w, y + U) : g.moveTo(0, y + U)); g.stroke();
+  // dry desert scrub and rocks
+  g.strokeStyle = '#140805'; g.fillStyle = '#140805'; g.lineCap = 'round';
+  for (let i = 0; i < 26; i++) {
+    const idx = Math.floor(rnd(0, N)), bx = idx / N * w, by = hs[idx] + 2 * U;
+    if (Math.random() < 0.6) {
+      for (let k = 0; k < 9; k++) {
+        const a = rnd(-1.1, 1.1), l = rnd(10, 34) * U;
+        g.lineWidth = rnd(1.2, 2.4) * U; g.beginPath(); g.moveTo(bx, by);
+        g.quadraticCurveTo(bx + Math.sin(a) * l * 0.4, by - l * 0.6, bx + Math.sin(a) * l, by - Math.cos(a) * l); g.stroke();
+      }
+    } else { g.beginPath(); g.ellipse(bx, by, rnd(8, 22) * U, rnd(5, 11) * U, 0, Math.PI, 0); g.fill(); }
+  }
+  return { c: o, top, w };
+}
+function drawTile(T, speed) {
+  const ox = -((scroll * speed) % T.w);
+  x.drawImage(T.c, ox, T.top); x.drawImage(T.c, ox + T.w, T.top);
+  if (ox + 2 * T.w < W) x.drawImage(T.c, ox + 2 * T.w, T.top);
+}
+
+// ------------------------------------------------------------------ dust
+function makeDustSprite() {
+  dustSprite = off(128, 128); const g = dustSprite.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(232,170,110,1)'); gr.addColorStop(0.5, 'rgba(220,150,95,0.45)'); gr.addColorStop(1, 'rgba(210,140,90,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+}
+function spawnDust(list, xx, yy, s, n) {
+  if (list.length > 260) return;
+  for (let i = 0; i < n; i++) list.push({ x: xx + rnd(-20, 20) * U * s, y: yy - rnd(0, 6) * U * s, vx: -V * s * rnd(0.25, 0.7), vy: -rnd(4, 18) * U * s,
+    r: rnd(8, 20) * U * s, g: rnd(6, 16) * U * s, life: 0, max: rnd(1.6, 3.4), a: rnd(0.1, 0.22) });
+}
+function drawDust(list, dt) {
+  for (const p of list) {
+    p.life += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.g * dt;
+    const k = p.life / p.max, a = p.a * Math.sin(Math.PI * clamp(k, 0, 1));
+    if (a <= 0) continue;
+    x.globalAlpha = a; x.drawImage(dustSprite, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+  }
+  x.globalAlpha = 1;
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].life >= list[i].max) list.splice(i, 1);
+}
+
+// ------------------------------------------------------------------ setup
+function resize() {
+  const dpr = window.devicePixelRatio || 1;   // no cap: full 4K
+  W = c.width = Math.round(innerWidth * dpr); H = c.height = Math.round(innerHeight * dpr);
+  U = H / 1000; horizon = 0.6 * H; V = 115 * U;
+  buildSky();
+  farDunes = duneTile(W * 2, horizon - 0.012 * H, horizon + 0.012 * H, 0.016 * H, [3, 7, 11], 'rgba(176,92,60,0.55)', 'rgba(255,190,110,0.35)', 1.2 * U);
+  midDunes = duneTile(W * 2, horizon - 0.006 * H, horizon + 0.05 * H, 0.04 * H, [2, 5, 9], '#a5532f', 'rgba(255,175,95,0.6)', 1.6 * U);
+  ripA = rippleTile(horizon + 0.045 * H, 0.7 * H, 260, 'rgba(255,190,120,0.35)', 'rgba(90,40,20,0.25)');
+  ripB = rippleTile(0.7 * H, 0.84 * H, 220, 'rgba(255,180,110,0.3)', 'rgba(70,30,15,0.3)');
+  ripC = rippleTile(0.84 * H, H, 160, 'rgba(255,170,100,0.25)', 'rgba(50,20,10,0.35)');
+  fore = foreTile();
+  vign = off(W, H); { const g = vign.getContext('2d'), vg = g.createRadialGradient(W * 0.5, H * 0.55, H * 0.35, W * 0.5, H * 0.55, Math.max(W * 0.75, H * 0.6));
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(10,2,8,0.55)'); g.fillStyle = vg; g.fillRect(0, 0, W, H); }
+  makeDustSprite();
+  ranks = [makeRank(0.655 * H, 0.3, 9), makeRank(0.675 * H, 0.36, 5), makeRank(0.73 * H, 0.5, -7), makeRank(0.765 * H, 0.58, -11)];
+  front = makeFront();
+  birds = Array.from({ length: 6 }, (_, i) => ({ th: rnd(0, TAU), sp: rnd(0.12, 0.22) * (Math.random() < 0.5 ? 1 : -1), R: rnd(0.04, 0.11) * W, cy: rnd(0.18, 0.3) * H, sz: rnd(0.8, 1.2), i }));
+  clouds = Array.from({ length: 9 }, () => ({ x: rnd(0, W), y: rnd(0.68, 0.8) * H, r: rnd(0.12, 0.24) * H, a: rnd(0.06, 0.12) }));
+  dustMid = []; dustFront = [];
+}
+addEventListener('resize', resize); resize();
+
+// ------------------------------------------------------------------ per-frame
+function drawRank(R, t, dt) {
+  const B = new Batch(), rk = R.rk, gs = V * R.s;
+  for (const u of R.units) {
+    u.x += R.drift * dt;
+    if (u.x > W + R.margin) u.x -= R.span; else if (u.x < -R.margin) u.x += R.span;
+    const stride = u.type === 'mounted' ? 1.15 * rk.h : 0.735 * rk.h;
+    u.ph += TAU * (gs + R.drift) / stride * dt;
+    if (u.x < -R.margin * 0.8 || u.x > W + R.margin * 0.8) continue;
+    if (u.type === 'mounted') mounted(B, u, u.x, R.y, rk, t); else footSoldier(B, u, u.x, R.y, rk, t);
+    if (R.s > 0.45 && Math.random() < dt * 0.9) spawnDust(dustMid, u.x, R.y, R.s, 1);
+  }
+  B.flush(rk.rimOn ? { dx: 0.011 * rk.h, dy: -0.007 * rk.h, col: rk.rim } : null);
+  drawFlags(B.flags, t);
+}
+
+function drawFront(t, dt) {
+  let glint = null;
+  for (const e of front) {
+    const rk = rankStyle(e.s), u = e.u, gs = V * e.s;
+    const X = e.at * W + Math.sin(t * 0.00027 + e.at * 40) * 0.008 * W;
+    u.ph += TAU * gs / (u.type === 'mounted' ? 1.15 * rk.h : 0.735 * rk.h) * dt;
+    const B = new Batch();
+    if (u.type === 'mounted') mounted(B, u, X, e.gy * H, rk, t); else footSoldier(B, u, X, e.gy * H, rk, t);
+    B.flush({ dx: 0.012 * rk.h, dy: -0.008 * rk.h, col: u.king ? '#ffd7a0' : rk.rim });
+    drawFlags(B.flags, t);
+    if (Math.random() < dt * (u.type === 'mounted' ? 5 : 2)) spawnDust(dustFront, X + rnd(-0.2, 0.3) * rk.h, e.gy * H, e.s, 1);
+    if (u.king) glint = u.glint;
+  }
+  if (glint) {   // Deus vult: the king's blade catches the sun
+    const k = 0.55 + 0.45 * Math.pow(Math.max(0, Math.sin(t * 0.0011)), 6), r = 34 * U * k;
+    x.save(); x.globalCompositeOperation = 'lighter';
+    const g = x.createRadialGradient(glint[0], glint[1], 0, glint[0], glint[1], r);
+    g.addColorStop(0, 'rgba(255,245,220,0.95)'); g.addColorStop(0.3, 'rgba(255,200,120,0.35)'); g.addColorStop(1, 'rgba(255,180,90,0)');
+    x.fillStyle = g; x.fillRect(glint[0] - r, glint[1] - r, r * 2, r * 2);
+    x.strokeStyle = `rgba(255,240,210,${0.6 * k})`; x.lineWidth = 1.5 * U;
+    x.beginPath(); x.moveTo(glint[0] - r * 1.4, glint[1]); x.lineTo(glint[0] + r * 1.4, glint[1]);
+    x.moveTo(glint[0], glint[1] - r * 1.4); x.lineTo(glint[0], glint[1] + r * 1.4); x.stroke();
+    x.restore();
+  }
+}
+
+function drawBirds(t, dt) {
+  x.strokeStyle = mixc(SIL, HAZE, 0.35); x.lineCap = 'round'; x.lineJoin = 'round';
+  const cx = 0.42 * W + Math.sin(t * 0.00005) * 0.06 * W;
+  for (const b of birds) {
+    b.th += b.sp * dt;
+    const k = b.sz * (1 + 0.22 * Math.sin(b.th)), bx = cx + b.R * Math.cos(b.th), by = b.cy + b.R * 0.28 * Math.sin(b.th);
+    const flapOn = Math.pow(Math.max(0, Math.sin(t * 0.0006 + b.i * 2.1)), 10);
+    const fl = flapOn * Math.sin(t * 0.018 + b.i) * 0.6, sp = 26 * U * k, dir = Math.sign(b.sp) * -Math.sign(Math.sin(b.th) || 1);
+    x.lineWidth = 3 * U * k;
+    x.beginPath();
+    x.moveTo(bx - sp, by - sp * (0.1 + fl * 0.5)); x.quadraticCurveTo(bx - sp * 0.45, by - sp * (0.3 + fl * 0.2), bx, by);
+    x.quadraticCurveTo(bx + sp * 0.45, by - sp * (0.3 + fl * 0.2), bx + sp, by - sp * (0.1 + fl * 0.5));
+    x.stroke();
+    x.lineWidth = 4.5 * U * k; x.beginPath(); x.moveTo(bx - 4 * U * k * dir, by + 1.5 * U * k); x.lineTo(bx + 5 * U * k * dir, by); x.stroke();
+  }
+}
+
+function shimmer(t) {
+  // heat haze: re-draw the horizon band in thin slices, each nudged sideways
+  const y0 = Math.floor(horizon - 0.085 * H), y1 = Math.ceil(horizon + 0.004 * H), hs = Math.max(2, Math.round(2.2 * U));
+  for (let y = y0; y < y1; y += hs) {
+    const k = 1 - (horizon - y) / (horizon - y0);
+    const o = Math.sin(y / U * 0.09 + t * 0.0045) * 1.6 * U * k + Math.sin(y / U * 0.23 - t * 0.0071) * 0.8 * U * k;
+    x.drawImage(skyC, 0, y, W, hs, o, y, W, hs);
+  }
+}
+
+function hazeBand(y0, y1, a) {
+  const g = x.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0, 'rgba(220,130,80,0)'); g.addColorStop(0.55, `rgba(225,140,85,${a})`); g.addColorStop(1, 'rgba(220,130,80,0)');
+  x.fillStyle = g; x.fillRect(0, y0, W, y1 - y0);
+}
+
+let last = 0;
+function frame(t) {
+  const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t;
+  scroll += V * dt;
+  x.lineCap = 'round'; x.lineJoin = 'round';
+
+  x.drawImage(skyC, 0, 0);
+  shimmer(t);
+  drawBirds(t, dt);
+  drawTile(farDunes, 0.03);
+  drawTile(midDunes, 0.12);
+  drawTile(ripA, 0.35);
+  drawRank(ranks[0], t, dt);
+  drawRank(ranks[1], t, dt);
+  hazeBand(0.62 * H, 0.71 * H, 0.32);
+  drawTile(ripB, 0.55);
+  drawDust(dustMid, dt);
+  drawRank(ranks[2], t, dt);
+  drawRank(ranks[3], t, dt);
+  for (const cl of clouds) {   // big rolling dust clouds behind the vanguard
+    cl.x -= V * 0.4 * dt; if (cl.x < -cl.r) cl.x += W + cl.r * 2;
+    x.globalAlpha = cl.a; x.drawImage(dustSprite, cl.x - cl.r, cl.y - cl.r * 0.5, cl.r * 2, cl.r);
+  }
+  x.globalAlpha = 1;
+  hazeBand(0.72 * H, 0.84 * H, 0.12);
+  drawTile(ripC, 1.0);
+  drawFront(t, dt);
+  drawDust(dustFront, dt);
+  drawTile(fore, 1.3);
+  x.drawImage(vign, 0, 0);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

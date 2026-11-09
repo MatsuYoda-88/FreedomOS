@@ -1,0 +1,13 @@
+# Pixel Shop v1.0 (FLUX.2 klein + Z-Image Turbo). torch + torchvision come from get_torch.py (NVIDIA build).
+diffusers>=0.42.1
+transformers>=4.51
+accelerate>=1.0
+peft>=0.17
+bitsandbytes>=0.45
+safetensors
+huggingface_hub
+sentencepiece
+tqdm
+flask>=3.0
+waitress
+pillow>=10.1

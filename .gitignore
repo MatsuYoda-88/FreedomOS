@@ -1,0 +1,32 @@
+# downloaded / built on your PC
+venv/
+**/venv/
+app/engine/
+app/engine_vulkan/
+app/imagegen/
+app/browser/builds/
+app/browser/src/bin/
+app/browser/src/obj/
+app/browser/build.log
+dist/
+# your private stuff - never commit
+app/logs/
+app/memory/
+app/outputs/
+app/training/
+app/claude pics/
+app/my style/
+app/crew_key.txt
+app/pixelshop/crew_key.txt
+app/pixelshop/models/
+app/pixelshop/outputs/
+app/pixelshop/mystyles/
+app/pixelshop/logs/
+app/*.vbs
+app/*link.txt
+app/firewall_done.txt
+app/no_remote.txt
+app/no_claude.txt
+app/engine_fixes.json
+__pycache__/
+*.pyc

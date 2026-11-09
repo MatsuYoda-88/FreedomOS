@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Midnight Rain City</title>
+<style>html,body{margin:0;height:100%;background:#03040c;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d');
+const NEON = ['#00f0ff', '#ff2fd0', '#8a5bff', '#36ff9a', '#ff8a2a'];
+let W, H, dpr, street, layers = [], drops = [], signs = [], flash = 0;
+const r = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+function makeLayer(depth) {
+  const blds = []; let px = -50 * dpr;
+  while (px < W + 50 * dpr) {
+    const w = r(40, 130) * dpr * (0.6 + depth), h = r(0.15, 0.55) * H * (0.5 + depth * 0.7);
+    const wins = [];
+    const cols = Math.floor(w / (9 * dpr)), rows = Math.floor(h / (12 * dpr));
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++)
+      if (Math.random() < 0.38) wins.push({ i, j, on: Math.random() < 0.8, col: Math.random() < 0.15 ? pick(NEON) : '#ffd9a0', t: r(0, 9000) });
+    blds.push({ x: px, w, h, wins, cols, rows, antenna: Math.random() < 0.3 });
+    px += w + r(2, 14) * dpr;
+  }
+  return { depth, blds };
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = c.width = innerWidth * dpr; H = c.height = innerHeight * dpr;
+  street = H * 0.78;
+  layers = [makeLayer(0.2), makeLayer(0.55), makeLayer(1)];
+  drops = Array.from({ length: 700 }, () => ({ x: r(0, W), y: r(0, H), v: r(14, 26) * dpr, l: r(10, 26) * dpr }));
+  signs = Array.from({ length: 7 }, () => ({ x: r(0.05, 0.95) * W, y: r(0.42, 0.7) * H, w: r(30, 90) * dpr, h: r(10, 22) * dpr, col: pick(NEON), ph: r(0, 10) }));
+}
+addEventListener('resize', resize); resize();
+
+function drawSky(t) {
+  const g = x.createLinearGradient(0, 0, 0, street);
+  g.addColorStop(0, '#02030a'); g.addColorStop(0.6, '#0b0f2c'); g.addColorStop(1, '#2a0f3d');
+  x.fillStyle = g; x.fillRect(0, 0, W, street);
+  if (flash > 0) { x.fillStyle = `rgba(160,170,255,${flash * 0.25})`; x.fillRect(0, 0, W, street); flash *= 0.86; }
+  if (Math.random() < 0.0015) flash = 1;
+}
+
+function drawCity(t) {
+  for (const L of layers) {
+    const shade = Math.floor(8 + L.depth * 10);
+    for (const b of L.blds) {
+      const top = street - b.h;
+      x.fillStyle = `rgb(${shade},${shade},${shade + 14})`;
+      x.fillRect(b.x, top, b.w, b.h);
+      if (b.antenna) {
+        x.fillRect(b.x + b.w / 2 - dpr, top - 30 * dpr * L.depth, 2 * dpr, 30 * dpr * L.depth);
+        if (Math.sin(t * 0.004 + b.x) > 0.6) { x.fillStyle = '#ff2a4a'; x.fillRect(b.x + b.w / 2 - 2 * dpr, top - 32 * dpr * L.depth, 4 * dpr, 4 * dpr); }
+      }
+      for (const w of b.wins) {
+        if (Math.random() < 0.0004) w.on = !w.on;
+        if (!w.on) continue;
+        x.globalAlpha = (0.25 + L.depth * 0.75) * (0.75 + 0.25 * Math.sin(t * 0.002 + w.t));
+        x.fillStyle = w.col;
+        x.fillRect(b.x + 4 * dpr + w.i * 9 * dpr, top + 6 * dpr + w.j * 12 * dpr, 4 * dpr, 6 * dpr);
+      }
+      x.globalAlpha = 1;
+    }
+  }
+}
+
+function drawSigns(t) {
+  x.save(); x.globalCompositeOperation = 'lighter';
+  for (const s of signs) {
+    const on = Math.sin(t * 0.003 + s.ph) > -0.85 || Math.random() < 0.5;
+    if (!on) continue;
+    x.shadowColor = s.col; x.shadowBlur = 25 * dpr; x.strokeStyle = s.col; x.lineWidth = 2.5 * dpr;
+    x.strokeRect(s.x, s.y, s.w, s.h);
+    x.globalAlpha = 0.25; x.fillStyle = s.col; x.fillRect(s.x, s.y, s.w, s.h); x.globalAlpha = 1;
+  }
+  x.restore();
+}
+
+function drawStreet(t) {
+  x.fillStyle = '#05050c'; x.fillRect(0, street, W, H - street);
+  // wet reflection: mirror the city, squash it, smear it
+  x.save();
+  x.globalAlpha = 0.38;
+  x.translate(0, street * 2);
+  x.scale(1, -1);
+  x.drawImage(c, 0, street * 0.55, W, street * 0.45, 0, street - (H - street), W, H - street);
+  x.restore();
+  // ripples
+  x.strokeStyle = 'rgba(140,200,255,0.12)'; x.lineWidth = 1 * dpr;
+  for (let i = 0; i < 30; i++) {
+    const y = street + ((i * 37 + t * 0.03) % (H - street));
+    x.beginPath(); x.moveTo(0, y); x.lineTo(W, y + Math.sin(t * 0.002 + i) * 3 * dpr); x.stroke();
+  }
+  const fog = x.createLinearGradient(0, street - H * 0.08, 0, street + H * 0.05);
+  fog.addColorStop(0, 'rgba(120,60,180,0)'); fog.addColorStop(0.5, 'rgba(120,60,180,0.18)'); fog.addColorStop(1, 'rgba(120,60,180,0)');
+  x.fillStyle = fog; x.fillRect(0, street - H * 0.08, W, H * 0.13);
+}
+
+function drawRain() {
+  x.strokeStyle = 'rgba(170,200,255,0.35)'; x.lineWidth = 1 * dpr;
+  x.beginPath();
+  for (const d of drops) {
+    x.moveTo(d.x, d.y); x.lineTo(d.x - d.l * 0.18, d.y + d.l);
+    d.y += d.v; d.x -= d.v * 0.18;
+    if (d.y > H) { d.y = r(-50, 0); d.x = r(0, W * 1.2); }
+  }
+  x.stroke();
+}
+
+function frame(t) {
+  drawSky(t); drawCity(t); drawSigns(t); drawStreet(t); drawRain();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

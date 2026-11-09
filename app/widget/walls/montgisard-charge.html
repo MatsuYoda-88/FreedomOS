@@ -1,0 +1,1052 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>The Charge of Montgisard</title>
+<style>html,body{margin:0;height:100%;background:#120c16;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* Montgisard, 1177: Baldwin IV and the True Cross against Saladin's host, at sunrise.
+   One engine, three modes: 'battle' (full loop), 'victory' (tableau), 'charge' (charge loop + victory).
+   Time-based, batched drawing, built for 4K @ 120Hz.  Add #t=SECONDS to the URL to jump in time. */
+'use strict';
+const MODE = 'charge';
+const c = document.getElementById('c');
+const x = c.getContext('2d', { alpha: false });
+
+// ------------------------------------------------------------------ helpers
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const ramp = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const smooth = t => t * t * (3 - 2 * t);
+const bump = (t, a, peak, b) => t <= a || t >= b ? 0 : t < peak ? smooth((t - a) / (peak - a)) : smooth(1 - (t - peak) / (b - peak));
+function hex(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+const _mix = new Map();
+function mixc(a, b, t) {
+  const k = a + b + t.toFixed(3); let v = _mix.get(k); if (v) return v;
+  const A = hex(a), B = hex(b);
+  v = '#' + A.map((q, i) => Math.round(q + (B[i] - q) * t).toString(16).padStart(2, '0')).join('');
+  _mix.set(k, v); return v;
+}
+function off(w, h) { const o = document.createElement('canvas'); o.width = Math.max(1, Math.ceil(w)); o.height = Math.max(1, Math.ceil(h)); return o; }
+
+const SIL = '#1a0f14', HAZE = '#d98b63';
+const COL = {
+  templar: '#efe3cf', templarX: '#b3191c', hosp: '#1f1818', hospX: '#efe3cf',
+  plain: ['#5a2e1f', '#3b3b55', '#6b5a2a', '#4a3a2c'], plainX: '#a31a1a',
+  gold: '#e8b640', royal: '#22357a', silver: '#d4d7dc',
+  ayy: '#d9a925', sarTunic: ['#7a5a2a', '#5a3a2a', '#3f4a3a', '#6b2a2a', '#8a7a4a', '#2f3f5a'],
+  turban: ['#e8dcc0', '#c9b48a', '#efe6d6', '#b89a6a'], round: ['#8a2a1a', '#2a4a6a', '#c9a23a', '#4a5a3a', '#6a4a2a'],
+};
+
+let W, H, U, horizon, skyC, ripA, ripB, ripC, fore, farDunes, vign, dustSprite;
+let SUN = { x: 0, y: 0, r: 0 }, TOWERS = [];
+let scroll = 0, startT = null;
+const T0 = parseFloat((location.hash.match(/t=([\d.]+)/) || [])[1]) || 0;
+
+// ------------------------------------------------------------------ batched drawing
+const ORDER = ['hLegFar', 'hTail', 'hBody', 'hNeck', 'hHead', 'hLeg', 'cloak', 'capa', 'capaX', 'robe', 'limb', 'pole', 'bow',
+  'tab', 'tabX', 'head', 'turb', 'mask', 'maskEye', 'crown', 'mitre', 'shield', 'shieldX', 'boss', 'metal', 'sword', 'gold'];
+const RIMKEYS = ['hTail', 'hBody', 'hNeck', 'hHead', 'hLeg', 'cloak', 'capa', 'robe', 'limb', 'pole', 'tab', 'head', 'turb', 'mitre', 'shield'];
+class Batch {
+  constructor() { this.m = new Map(); this.flags = []; this.glows = []; }
+  s(key, lw, color) { return this.get(key, 's', lw, color); }
+  f(key, color) { return this.get(key, 'f', 0, color); }
+  get(key, mode, lw, color) {
+    let b = this.m.get(key);
+    if (!b) { b = { p: new Path2D(), mode, lw, color }; this.m.set(key, b); }
+    return b.p;
+  }
+  flush(rim) {
+    const draw = (b, col) => {
+      if (b.mode === 's') { x.strokeStyle = col; x.lineWidth = b.lw; x.stroke(b.p); } else { x.fillStyle = col; x.fill(b.p); }
+    };
+    if (rim) {
+      x.save(); x.translate(rim.dx, rim.dy);
+      for (const pre of RIMKEYS) for (const [k, b] of this.m) if (k === pre || k.startsWith(pre + ':')) draw(b, rim.col);
+      x.restore();
+    }
+    for (const pre of ORDER) for (const [k, b] of this.m) if (k === pre || k.startsWith(pre + ':')) draw(b, b.color);
+  }
+}
+function seg(p, ...q) { p.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) p.lineTo(q[i], q[i + 1]); }
+function poly(p, q) { p.moveTo(q[0], q[1]); for (let i = 2; i < q.length; i += 2) p.lineTo(q[i], q[i + 1]); p.closePath(); }
+function circ(p, cx, cy, r) { p.moveTo(cx + r, cy); p.arc(cx, cy, r, 0, TAU); }
+function ell(p, cx, cy, rx, ry, rot, a0, a1) {   // lift the pen first so batched shapes never join up
+  p.moveTo(cx + rx * Math.cos(a0) * Math.cos(rot) - ry * Math.sin(a0) * Math.sin(rot), cy + rx * Math.cos(a0) * Math.sin(rot) + ry * Math.sin(a0) * Math.cos(rot));
+  p.ellipse(cx, cy, rx, ry, rot, a0, a1);
+}
+
+function rankStyle(s) {
+  const f = clamp((1 - s) * 0.95, 0, 0.75);
+  return {
+    s, h: 170 * U * s, f,
+    sil: mixc(SIL, HAZE, f), silFar: mixc(mixc(SIL, '#000000', 0.25), HAZE, f),
+    rim: mixc('#ffd08a', HAZE, f * 0.6), metal: mixc('#8a8290', HAZE, f),
+    tint: col => mixc(mixc(col, SIL, 0.25), HAZE, f), rimOn: s > 0.42,
+  };
+}
+
+// ------------------------------------------------------------------ figure parts
+function heater(B, cx, cy, w, hh, col, xcol, cross) {
+  poly(B.f('shield:' + col, col), [cx - w / 2, cy - hh / 2, cx + w / 2, cy - hh / 2, cx + w / 2, cy + hh * 0.05, cx, cy + hh / 2, cx - w / 2, cy + hh * 0.05]);
+  if (cross) { const p = B.f('shieldX:' + xcol, xcol); p.rect(cx - w * 0.1, cy - hh * 0.42, w * 0.2, hh * 0.78); p.rect(cx - w * 0.42, cy - hh * 0.2, w * 0.84, hh * 0.17); }
+}
+function roundShield(B, rk, cx, cy, r, col) {
+  circ(B.f('shield:' + col, col), cx, cy, r);
+  circ(B.f('boss', rk.metal), cx, cy, r * 0.28);
+}
+function tabard(B, u, rk, nx, ny, hipX, hipY, h, low) {
+  if (!u.tab) return;
+  const col = rk.tint(u.tab);
+  poly(B.f('tab:' + col, col), [nx - 0.055 * h, ny + 0.03 * h, nx + 0.055 * h, ny + 0.03 * h, hipX + 0.075 * h, hipY + low * h, hipX - 0.075 * h, hipY + low * h]);
+  if (u.tabX && rk.s > 0.33) {
+    const xc = rk.tint(u.tabX), cx = (nx + hipX) / 2, p = B.f('tabX:' + xc, xc);
+    p.rect(cx - 0.014 * h, ny + 0.05 * h, 0.028 * h, hipY - ny + 0.02 * h);
+    p.rect(cx - 0.047 * h, ny + 0.1 * h, 0.094 * h, 0.026 * h);
+  }
+}
+function headgear(B, u, rk, hx, hy, h) {
+  const p = B.f('head', rk.sil), r = 0.072 * h;
+  switch (u.helm) {
+    case 'great': p.rect(hx - r * 0.95, hy - r * 1.1, r * 1.9, r * 2.05); break;
+    case 'nasal': circ(p, hx, hy, r); poly(p, [hx - r * 0.9, hy - r * 0.3, hx, hy - r * 1.75, hx + r * 0.9, hy - r * 0.3]); break;
+    case 'kettle': circ(p, hx, hy, r); ell(p, hx, hy - r * 0.45, r * 1.55, r * 0.32, 0, 0, TAU); break;
+    case 'spike': circ(p, hx, hy, r); poly(p, [hx - r * 0.85, hy - r * 0.35, hx, hy - r * 2.2, hx + r * 0.85, hy - r * 0.35]); break;
+    case 'turban': {
+      circ(p, hx, hy, r);
+      const col = rk.tint(u.turbCol || COL.turban[0]), q = B.f('turb:' + col, col);
+      ell(q, hx - r * 0.05, hy - r * 0.5, r * 1.18, r * 0.78, 0, 0, TAU);
+      if (u.turbSpike) poly(q, [hx - r * 0.25, hy - r * 1.1, hx, hy - r * 2.0, hx + r * 0.25, hy - r * 1.1]);
+      break;
+    }
+    case 'mitre': {
+      circ(p, hx, hy, r);
+      const col = rk.tint('#efe6d6'), q = B.f('mitre', col);
+      poly(q, [hx - r * 0.95, hy - r * 0.5, hx - r * 0.75, hy - r * 2.1, hx, hy - r * 2.7, hx + r * 0.75, hy - r * 2.1, hx + r * 0.95, hy - r * 0.5]);
+      const g = B.f('gold', rk.tint(COL.gold)); g.rect(hx - r * 0.12, hy - r * 2.5, r * 0.24, r * 1.9); g.rect(hx - r * 0.95, hy - r * 0.8, r * 1.9, r * 0.25);
+      break;
+    }
+    default: circ(p, hx, hy, r);
+  }
+}
+function tip(B, rk, x0, y0, x1, y1, h, len) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  poly(B.f('metal', rk.metal), [x1 + ux * len, y1 + uy * len, x1 - uy * 0.02 * h, y1 + ux * 0.02 * h, x1 + uy * 0.02 * h, y1 - ux * 0.02 * h]);
+}
+function swing(p, sx, sy, ang, h) {
+  const ex = sx + Math.sin(ang) * 0.15 * h, ey = sy + Math.cos(ang) * 0.15 * h;
+  const hx = ex + Math.sin(ang + 0.35) * 0.14 * h, hy = ey + Math.cos(ang + 0.35) * 0.14 * h;
+  seg(p, sx, sy, ex, ey, hx, hy); return [hx, hy];
+}
+// arm pointing along angle th (0 = straight down, PI = straight up, positive = forward)
+function armTo(p, sx, sy, th, h, bend = 0.25) {
+  const ex = sx + Math.sin(th - bend) * 0.15 * h, ey = sy + Math.cos(th - bend) * 0.15 * h;
+  const hx = ex + Math.sin(th + bend * 0.5) * 0.14 * h, hy = ey + Math.cos(th + bend * 0.5) * 0.14 * h;
+  seg(p, sx, sy, ex, ey, hx, hy); return [hx, hy];
+}
+function blade(B, rk, hx, hy, th, len, h) {
+  const tx = hx + Math.sin(th) * len, ty = hy + Math.cos(th) * len;
+  seg(B.s('sword', 0.02 * h, rk.tint(COL.silver)), hx, hy, tx, ty);
+  seg(B.s('pole', 0.021 * h, rk.sil), hx - Math.cos(th) * 0.05 * h, hy + Math.sin(th) * 0.05 * h, hx + Math.cos(th) * 0.05 * h, hy - Math.sin(th) * 0.05 * h);
+  return [tx, ty];
+}
+
+// ------------------------------------------------------------------ foot soldiers
+function foot(B, u, X, gy, rk, t) {
+  const h = rk.h * u.k, ph = u.ph, s = Math.sin(ph), cs = Math.cos(ph), act = u.act;
+  const amp = 0.42 * clamp(u.m, 0, 1.5), lean = (act === 'run' || act === 'flee' ? 0.06 : 0.03) * h * clamp(u.m, 0, 1);
+  const jump = act === 'cheer' ? Math.pow(Math.max(0, Math.sin(t * 0.0055 + u.fo)), 2) * 0.05 * h : 0;
+  const limb = B.s('limb', 0.056 * h, rk.sil), pole = B.s('pole', 0.02 * h, rk.sil);
+  const hipX = X, hipY = gy - 0.455 * h - 0.03 * h * Math.abs(cs) * clamp(u.m, 0, 1) - jump;
+  if (u.robe) {   // long robe instead of legs (the bishop)
+    const col = rk.tint(u.robe);
+    poly(B.f('robe', col), [hipX - 0.06 * h, hipY - 0.29 * h, hipX + 0.08 * h, hipY - 0.29 * h, hipX + 0.15 * h, gy, hipX - 0.13 * h, gy]);
+  } else {
+    for (const [a, bend] of [[amp * s, Math.max(0, cs) * 0.75 * clamp(u.m, 0, 1)], [-amp * s, Math.max(0, -cs) * 0.75 * clamp(u.m, 0, 1)]]) {
+      const kx = hipX + Math.sin(a) * 0.245 * h, ky = hipY + Math.cos(a) * 0.245 * h;
+      seg(limb, hipX, hipY, kx, ky, kx + Math.sin(a - bend) * 0.245 * h, ky + Math.cos(a - bend) * 0.245 * h);
+    }
+  }
+  const nx = hipX + 0.035 * h + lean, ny = hipY - 0.29 * h, hx = nx + 0.012 * h + lean * 0.3, hy = ny - 0.085 * h;
+  seg(limb, hipX, hipY, nx, ny);
+  const sy = ny + 0.02 * h, aSw = -0.35 * s * clamp(u.m, 0.15, 1.3);
+  const fighting = act === 'fight', cheering = act === 'cheer';
+
+  if (u.type === 'spear') {
+    swing(limb, nx, sy, aSw, h);
+    if (fighting) {
+      const jab = Math.max(0, Math.sin(t * 0.011 + u.fo)) * 0.1 * h, hx2 = nx + 0.12 * h + jab, hy2 = ny + 0.12 * h;
+      seg(limb, nx, sy, nx + 0.06 * h + jab * 0.5, ny + 0.16 * h, hx2, hy2);
+      const x0 = hx2 - 0.45 * h, y0 = hy2 + 0.02 * h, x1 = hx2 + 0.7 * h, y1 = hy2 - 0.04 * h;
+      seg(pole, x0, y0, x1, y1); tip(B, rk, x0, y0, x1, y1, h, 0.08 * h);
+    } else if (cheering) {
+      const [hx2, hy2] = armTo(limb, nx, sy, Math.PI - 0.25, h, 0.1);
+      const x0 = hx2 - 0.03 * h, y0 = hy2 + 0.35 * h, x1 = hx2 + 0.05 * h, y1 = hy2 - 0.9 * h;
+      seg(pole, x0, y0, x1, y1); tip(B, rk, x0, y0, x1, y1, h, 0.08 * h);
+    } else {
+      const hx2 = nx + 0.1 * h, hy2 = ny + 0.08 * h;
+      seg(limb, nx, sy, nx + 0.07 * h, ny + 0.14 * h, hx2, hy2);
+      const x0 = hx2 - 0.03 * h, y0 = hy2 + 0.36 * h, x1 = hx2 + 0.09 * h, y1 = hy2 - 0.9 * h;
+      seg(pole, x0, y0, x1, y1); tip(B, rk, x0, y0, x1, y1, h, 0.08 * h);
+    }
+  } else if (u.type === 'knight') {
+    if (fighting) {
+      const th = 2.2 + 0.95 * Math.sin(t * 0.012 + u.fo);
+      const [hx2, hy2] = armTo(limb, nx, sy, th, h); blade(B, rk, hx2, hy2, th, 0.32 * h, h);
+    } else if (cheering) {
+      const th = Math.PI - 0.15 + 0.15 * Math.sin(t * 0.008 + u.fo);
+      const [hx2, hy2] = armTo(limb, nx, sy, th, h, 0.1); blade(B, rk, hx2, hy2, th, 0.32 * h, h);
+    } else {
+      swing(limb, nx, sy, -aSw, h);
+      seg(pole, hipX + 0.02 * h, hipY - 0.03 * h, hipX - 0.2 * h, hipY + 0.16 * h);
+    }
+    seg(limb, nx, sy, nx + 0.06 * h, ny + 0.15 * h, nx + 0.1 * h, ny + 0.17 * h);
+  } else if (u.type === 'archer') {
+    if (act === 'shoot') {
+      const hx2 = nx + 0.22 * h, hy2 = ny + 0.0 * h, draw = 0.5 + 0.5 * Math.sin(t * 0.0045 + u.fo);
+      seg(limb, nx, sy, nx + 0.11 * h, ny + 0.0 * h, hx2, hy2);
+      const dx = nx - 0.02 * h - draw * 0.05 * h;
+      seg(limb, nx, sy, nx + 0.06 * h, ny + 0.06 * h, dx, ny + 0.01 * h);
+      const bw = B.s('bow', 0.018 * h, rk.sil);
+      ell(bw, hx2, hy2, 0.05 * h, 0.21 * h, -0.12, -Math.PI / 2, Math.PI / 2);
+      seg(B.s('pole', 0.008 * h, rk.metal), hx2 + Math.sin(-0.12) * 0.21 * h, hy2 - 0.21 * h, dx, ny + 0.01 * h, hx2 - Math.sin(-0.12) * 0.21 * h, hy2 + 0.21 * h);
+    } else if (cheering) {
+      armTo(limb, nx, sy, Math.PI - 0.3, h, 0.1); armTo(limb, nx, sy, Math.PI + 0.3, h, 0.1);
+    } else {
+      swing(limb, nx, sy, aSw, h); swing(limb, nx, sy, -aSw, h);
+      ell(B.s('bow', 0.018 * h, rk.sil), nx - 0.04 * h, ny + 0.13 * h, 0.24 * h, 0.05 * h, -1.15, 0.1, Math.PI - 0.1);
+    }
+  } else if (u.type === 'banner' || u.type === 'bishop') {
+    swing(limb, nx, sy, aSw, h);
+    const pump = cheering ? Math.max(0, Math.sin(t * 0.0055 + u.fo)) * 0.08 * h : 0;
+    const px = nx + 0.09 * h, py = ny + 0.06 * h - pump;
+    seg(limb, nx, sy, nx + 0.06 * h, ny + 0.13 * h - pump, px, py);
+    const top = py - (u.type === 'bishop' ? 1.2 : 1.05) * h;
+    seg(pole, px, py + 0.42 * h, px, top);
+    if (u.type === 'bishop') {   // the True Cross
+      const g = B.f('gold', rk.tint(COL.gold));
+      g.rect(px - 0.022 * h, top - 0.3 * h, 0.044 * h, 0.36 * h);
+      g.rect(px - 0.11 * h, top - 0.22 * h, 0.22 * h, 0.042 * h);
+      B.glows.push([px, top - 0.2 * h, h]);
+    } else B.flags.push({ x: px, y: top + 0.02 * h, len: 0.48 * h, ht: 0.3 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.1 });
+  }
+  tabard(B, u, rk, nx, ny, hipX, hipY, h, 0.12);
+  if (u.type === 'knight') {
+    if (u.sar) roundShield(B, rk, nx + 0.11 * h, ny + 0.19 * h, 0.095 * h, rk.tint(u.shield));
+    else heater(B, nx + 0.11 * h, ny + 0.2 * h, 0.16 * h, 0.23 * h, rk.tint(u.shield), rk.tint(u.shieldX), rk.s > 0.33);
+  } else if (u.type === 'spear' && u.sar && rk.s > 0.3) roundShield(B, rk, nx - 0.04 * h, ny + 0.16 * h, 0.085 * h, rk.tint(u.shield));
+  headgear(B, u, rk, hx, hy, h);
+}
+
+// ------------------------------------------------------------------ horses and riders
+function horse(B, u, X, gy, rk, t, h, col, colFar) {
+  const ph = u.ph, gal = clamp(u.m - 1, 0, 1), amp = (0.36 + gal * 0.22) * clamp(u.m, 0, 1);
+  const bob = (0.018 + gal * 0.03) * h * Math.abs(Math.sin(ph * 2)) * clamp(u.m, 0, 1);
+  const bx = X, by = gy - 0.5 * h - bob;
+  const offs = gal > 0.5 ? [[0.22, 0.1, 1], [-0.3, 0.55, 1], [0.25, 0.0, 0], [-0.27, 0.45, 0]] : [[0.22, 0.75, 1], [-0.3, 0.5, 1], [0.25, 0.25, 0], [-0.27, 0, 0]];
+  for (const [lx, o, far] of offs) {
+    const q = ph + o * TAU, a = amp * Math.sin(q), bend = Math.max(0, Math.cos(q)) * 0.9 * clamp(u.m, 0, 1);
+    const tx = bx + lx * h, ty = by + 0.06 * h;
+    const kx = tx + Math.sin(a) * 0.22 * h, ky = ty + Math.cos(a) * 0.22 * h;
+    seg(far ? B.s('hLegFar:' + colFar, 0.05 * h, colFar) : B.s('hLeg:' + col, 0.052 * h, col),
+      tx, ty, kx, ky, kx + Math.sin(a - bend) * 0.22 * h, ky + Math.cos(a - bend) * 0.22 * h);
+  }
+  const nod = (0.025 + gal * 0.03) * h * Math.sin(ph * 2) * clamp(u.m, 0.3, 1), stretch = gal * 0.06 * h;
+  const sway = 0.04 * h * Math.sin(t * 0.0021 + u.fo) + gal * 0.05 * h;
+  seg(B.s('hBody:' + col, 0.25 * h, col), bx - 0.3 * h, by, bx + 0.24 * h, by - 0.02 * h);
+  seg(B.s('hNeck:' + col, 0.12 * h, col), bx + 0.2 * h, by - 0.05 * h, bx + 0.38 * h + stretch, by - 0.3 * h + nod + stretch);
+  seg(B.s('hHead:' + col, 0.09 * h, col), bx + 0.38 * h + stretch, by - 0.3 * h + nod + stretch, bx + 0.53 * h + stretch * 1.4, by - 0.19 * h + nod + stretch * 0.8);
+  poly(B.f('hHead:e' + col, col), [bx + 0.35 * h + stretch, by - 0.33 * h + nod + stretch, bx + 0.37 * h + stretch, by - 0.42 * h + nod + stretch, bx + 0.4 * h + stretch, by - 0.33 * h + nod + stretch]);
+  const tail = B.s('hTail:' + col, 0.045 * h, col);
+  tail.moveTo(bx - 0.4 * h, by - 0.05 * h); tail.quadraticCurveTo(bx - 0.55 * h + sway, by + 0.04 * h - gal * 0.08 * h, bx - 0.52 * h + sway * 1.5 - gal * 0.1 * h, by + 0.3 * h - gal * 0.2 * h);
+  return { bx, by, nod: nod + stretch };
+}
+function caparison(B, u, rk, bx, by, h, t, col, xcol) {
+  const pts = [bx - 0.42 * h, by - 0.11 * h, bx + 0.3 * h, by - 0.12 * h, bx + 0.36 * h, by + 0.2 * h];
+  const fl = 1 + clamp(u.m - 1, 0, 1) * 2;
+  for (let i = 0; i <= 8; i++) {
+    const k = i / 8;
+    pts.push(bx + 0.36 * h - k * 0.8 * h - k * k * 0.06 * h * (fl - 1), by + 0.2 * h + Math.sin(k * 9 + t * 0.006 * fl + u.fo) * 0.016 * h * fl + k * 0.02 * h - k * (fl - 1) * 0.04 * h);
+  }
+  poly(B.f('capa:' + col, col), pts);
+  if (xcol && rk.s > 0.33) {
+    const p = B.f('capaX:' + xcol, xcol);
+    p.rect(bx - 0.08 * h, by - 0.08 * h, 0.05 * h, 0.26 * h); p.rect(bx - 0.17 * h, by + 0.01 * h, 0.23 * h, 0.05 * h);
+  }
+}
+function mounted(B, u, X, gy, rk, t) {
+  const h = rk.h * u.k, act = u.act;
+  const hc = u.horse ? rk.tint(u.horse) : rk.sil, hcFar = u.horse ? mixc(hc, SIL, 0.35) : rk.silFar;
+  const { bx, by, nod } = horse(B, u, X, gy, rk, t, h, hc, hcFar);
+  if (u.capa) caparison(B, u, rk, bx, by, h, t, rk.tint(u.capa), u.capaX ? rk.tint(u.capaX) : null);
+  if (u.noRider) return;
+  const limb = B.s('limb', 0.056 * h, rk.sil), pole = B.s('pole', 0.021 * h, rk.sil);
+  const gal = clamp(u.m - 1, 0, 1), lean = gal * 0.07 * h;
+  const jump = act === 'cheer' ? Math.pow(Math.max(0, Math.sin(t * 0.0055 + u.fo)), 2) * 0.025 * h : 0;
+  const hipX = bx - 0.04 * h, hipY = by - 0.14 * h, nx = bx - 0.005 * h + lean, ny = by - 0.44 * h + lean * 0.4 - jump;
+  const hx = nx + 0.01 * h + lean * 0.3, hy = ny - 0.085 * h;
+  if (u.king) {
+    const fl = 1 + gal * 1.5, cl = B.f('cloak', rk.tint(COL.royal)), pts = [nx - 0.03 * h, ny + 0.01 * h];
+    for (let i = 0; i <= 10; i++) {
+      const k = i / 10;
+      pts.push(nx - 0.03 * h - k * 0.55 * h * (1 + gal * 0.35), ny + 0.02 * h + k * 0.2 * h * (1 - gal * 0.55) + Math.sin(k * 7 - t * 0.007 * fl) * 0.04 * h * k * fl);
+    }
+    pts.push(hipX - 0.42 * h, hipY + 0.06 * h - gal * 0.08 * h, hipX + 0.02 * h, hipY);
+    poly(cl, pts);
+  }
+  seg(limb, hipX, hipY, bx + 0.12 * h, by - 0.04 * h, bx + 0.08 * h, by + 0.16 * h);
+  seg(limb, hipX, hipY, nx, ny);
+  seg(limb, nx, ny + 0.02 * h, nx + 0.1 * h, ny + 0.16 * h, nx + 0.2 * h, ny + 0.18 * h);
+  seg(pole, nx + 0.2 * h, ny + 0.18 * h, bx + 0.48 * h + nod * 0.5, by - 0.23 * h + nod);
+
+  if (u.weapon === 'sword') {
+    let th = 2.65;
+    if (act === 'fight') th = 1.6 + 1.2 * (0.5 + 0.5 * Math.sin(t * 0.013 + u.fo));
+    else if (act === 'cheer') th = Math.PI - 0.08 + 0.1 * Math.sin(t * 0.008 + u.fo);
+    else if (gal > 0.5) th = 1.95;
+    const [hx2, hy2] = armTo(limb, nx, ny + 0.02 * h, th, h, 0.2);
+    const tp = blade(B, rk, hx2, hy2, th, 0.42 * h, h);
+    if (u.king) u.glint = tp;
+  } else if (u.weapon === 'bow') {
+    const hx2 = nx + 0.22 * h, hy2 = ny + 0.04 * h;
+    seg(limb, nx, ny + 0.02 * h, nx + 0.11 * h, ny + 0.04 * h, hx2, hy2);
+    ell(B.s('bow', 0.018 * h, rk.sil), hx2, hy2, 0.05 * h, 0.21 * h, -0.12, -Math.PI / 2, Math.PI / 2);
+    seg(limb, nx, ny + 0.02 * h, nx + 0.04 * h, ny + 0.08 * h, nx - 0.03 * h, ny + 0.04 * h);
+  } else {   // lance or big banner
+    let th = 0.14, extra = 0;
+    if (u.big) th = 0.05;
+    else if (act === 'cheer') { th = 0.08; extra = Math.max(0, Math.sin(t * 0.0055 + u.fo)) * 0.08 * h; }
+    else th = lerp(0.14, 1.5, u.lance || 0);
+    const hx2 = nx + 0.1 * h, hy2 = ny + 0.12 * h - extra;
+    seg(limb, nx, ny + 0.02 * h, nx + 0.06 * h, ny + 0.17 * h - extra, hx2, hy2);
+    const dx = Math.sin(th), dy = -Math.cos(th), back = u.big ? 0.4 : 0.42, fwd = u.big ? 1.55 : 1.25;
+    const x0 = hx2 - dx * back * h, y0 = hy2 - dy * back * h, x1 = hx2 + dx * fwd * h, y1 = hy2 + dy * fwd * h;
+    seg(pole, x0, y0, x1, y1);
+    if (u.big) B.flags.push({ x: x1, y: y1 + 0.03 * h, len: 0.78 * h, ht: 0.48 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.06, big: true, speed: 1 + gal });
+    else {
+      tip(B, rk, x0, y0, x1, y1, h, 0.07 * h);
+      if ((u.lance || 0) < 0.35 && u.flag) B.flags.push({ x: x1 - 0.005 * h, y: y1 + 0.04 * h, len: 0.3 * h, ht: 0.11 * h, d: u.flag, o: u.fo, f: rk.f, taper: 0.85, speed: 1 + gal });
+    }
+  }
+  tabard(B, u, rk, nx, ny, hipX, hipY, h, 0.14);
+  if (u.shield) {
+    if (u.sar) roundShield(B, rk, bx - 0.02 * h, by - 0.22 * h, 0.1 * h, rk.tint(u.shield));
+    else heater(B, bx - 0.02 * h, by - 0.22 * h, 0.15 * h, 0.22 * h, rk.tint(u.shield), rk.tint(u.shieldX), rk.s > 0.33);
+  }
+  if (u.king) kingHead(B, rk, hx, hy, h, 0);
+  else headgear(B, u, rk, hx, hy, h);
+}
+function kingHead(B, rk, hx, hy, h, bow) {
+  const r = 0.075 * h;
+  circ(B.f('mask', rk.tint(COL.silver)), hx, hy, r);
+  const e = B.f('maskEye', '#120808');
+  e.rect(hx - r * 0.15, hy - r * 0.28 + bow * r * 0.2, r * 0.42, r * 0.17); e.rect(hx + r * 0.42, hy - r * 0.28 + bow * r * 0.2, r * 0.38, r * 0.17);
+  e.rect(hx + r * 0.25, hy + r * 0.32, r * 0.5, r * 0.09);
+  const cr = B.f('crown', rk.tint(COL.gold)), b0 = hy - r * 0.75, top = b0 - r * 0.85;
+  poly(cr, [hx - r * 1.02, b0 + r * 0.25, hx - r * 1.02, top, hx - r * 0.6, b0 - r * 0.25, hx - r * 0.25, top - r * 0.15,
+    hx + r * 0.08, b0 - r * 0.25, hx + r * 0.45, top - r * 0.15, hx + r * 0.75, b0 - r * 0.25, hx + r * 1.05, top, hx + r * 1.05, b0 + r * 0.25]);
+}
+// Baldwin on one knee before the True Cross, hands on his planted sword
+function kneeling(B, u, X, gy, rk, t, rise) {
+  const h = rk.h * u.k, limb = B.s('limb', 0.056 * h, rk.sil), lift = rise * 0.18 * h;
+  const hipX = X, hipY = gy - 0.27 * h - lift;
+  const nx = hipX + 0.07 * h * (1 - rise), ny = hipY - 0.29 * h, bowA = 1 - rise;
+  const cl = B.f('cloak', rk.tint(COL.royal));
+  poly(cl, [nx - 0.03 * h, ny + 0.01 * h, nx - 0.2 * h, ny + 0.2 * h, hipX - 0.36 * h, gy - 0.01 * h, hipX - 0.05 * h, gy - 0.01 * h, hipX, hipY]);
+  seg(limb, hipX, hipY, hipX + 0.21 * h, hipY + 0.02 * h, hipX + 0.22 * h, gy);           // front leg, knee up
+  seg(limb, hipX, hipY, hipX - 0.04 * h, gy - 0.02 * h, hipX - 0.27 * h, gy - 0.025 * h);   // back knee on the ground
+  seg(limb, hipX, hipY, nx, ny);
+  const hx2 = hipX + 0.17 * h, hy2 = ny + 0.16 * h;
+  seg(limb, nx, ny + 0.02 * h, nx + 0.06 * h, ny + 0.14 * h, hx2, hy2);
+  seg(limb, nx, ny + 0.02 * h, nx + 0.03 * h, ny + 0.15 * h, hx2 - 0.01 * h, hy2 + 0.01 * h);
+  seg(B.s('sword', 0.02 * h, rk.tint(COL.silver)), hx2 + 0.01 * h, hy2, hx2 + 0.02 * h, gy);
+  seg(B.s('pole', 0.021 * h, rk.sil), hx2 - 0.05 * h, hy2 + 0.02 * h, hx2 + 0.07 * h, hy2 + 0.02 * h);
+  tabard(B, u, rk, nx, ny, hipX, hipY, h, 0.1);
+  kingHead(B, rk, nx + 0.012 * h + bowA * 0.035 * h, ny - 0.085 * h + bowA * 0.02 * h, h, bowA);
+}
+
+// ------------------------------------------------------------------ flags
+const DESIGNS = {
+  jerusalem: [['#efe6d6', 0, 0, 1, 1], ['G', .44, .15, .56, .85], ['G', .25, .44, .75, .56], ['G', .38, .15, .62, .22], ['G', .38, .78, .62, .85],
+    ['G', .25, .37, .31, .63], ['G', .69, .37, .75, .63], ['G', .31, .2, .35, .34], ['G', .27, .25, .39, .29], ['G', .65, .2, .69, .34], ['G', .61, .25, .73, .29],
+    ['G', .31, .66, .35, .8], ['G', .27, .71, .39, .75], ['G', .65, .66, .69, .8], ['G', .61, .71, .73, .75]],
+  beauseant: [['#1f1818', 0, 0, 1, .5], ['#efe3cf', 0, .5, 1, 1]],
+  hosp: [['#a3161a', 0, 0, 1, 1], ['#efe3cf', .43, 0, .57, 1], ['#efe3cf', 0, .4, 1, .6]],
+  templar: [['#efe3cf', 0, 0, 1, 1], ['#b3191c', .42, 0, .58, 1], ['#b3191c', 0, .38, 1, .62]],
+  red: [['#9e1b1b', 0, 0, 1, 1], ['#e8b640', 0, .4, 1, .6]],
+  ayy: [['#d9a925', 0, 0, 1, 1]],
+  ayy2: [['#d9a925', 0, 0, 1, 1], ['#efe6d6', 0, .8, 1, .9]],
+  green: [['#2f6a3a', 0, 0, 1, 1]],
+};
+function flagPts(fl, t, u0, v0, u1, v1, n) {
+  const pts = [], sp = 0.0058 * (fl.speed || 1);
+  const F = (u, v) => {
+    const ph = u * 6.2 - t * sp + fl.o, w = Math.sin(ph) * fl.ht * 0.17 * u + u * fl.ht * 0.06;
+    return [fl.x - fl.len * u * (0.93 + 0.07 * Math.cos(ph)), fl.y + w + v * fl.ht * (1 - fl.taper * u)];
+  };
+  for (let i = 0; i <= n; i++) pts.push(...F(u0 + (u1 - u0) * i / n, v0));
+  for (let i = n; i >= 0; i--) pts.push(...F(u0 + (u1 - u0) * i / n, v1));
+  return pts;
+}
+function fillPts(p) { x.beginPath(); x.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) x.lineTo(p[i], p[i + 1]); x.closePath(); x.fill(); }
+function drawFlags(list, t) {
+  for (const fl of list) {
+    const n = fl.big ? 14 : (fl.f > 0.45 ? 4 : 8), sp = 0.0058 * (fl.speed || 1);
+    for (const [col, u0, v0, u1, v1] of DESIGNS[fl.d]) {
+      x.fillStyle = mixc(mixc(col === 'G' ? COL.gold : col, SIL, 0.18), HAZE, fl.f);
+      fillPts(flagPts(fl, t, u0, v0, u1, v1, n));
+    }
+    for (let i = 0; i < n; i++) {
+      const u0 = i / n, u1 = (i + 1) / n, sl = Math.cos(((u0 + u1) / 2) * 6.2 - t * sp + fl.o);
+      x.fillStyle = sl > 0 ? `rgba(255,205,130,${0.22 * sl * (1 - fl.f)})` : `rgba(20,6,10,${-0.33 * sl})`;
+      fillPts(flagPts(fl, t, u0, 0, u1, 1, 1));
+    }
+  }
+}
+
+// ------------------------------------------------------------------ units
+const CFAC = ['templar', 'templar', 'hosp', 'plain', 'plain', 'plain', 'plain'];
+function crusader(type) {
+  const fac = pick(CFAC), u = { side: 'C', type, fac, ph: rnd(0, TAU), fo: rnd(0, TAU), k: rnd(0.94, 1.06), m: 0, act: 'stand' };
+  if (fac === 'templar') Object.assign(u, { tab: COL.templar, tabX: COL.templarX, shield: COL.templar, shieldX: COL.templarX, flag: type === 'banner' ? 'beauseant' : 'templar' });
+  else if (fac === 'hosp') Object.assign(u, { tab: COL.hosp, tabX: COL.hospX, shield: COL.hosp, shieldX: COL.hospX, flag: 'hosp' });
+  else Object.assign(u, { tab: pick(COL.plain), tabX: type === 'archer' ? null : COL.plainX, shield: pick(['#7a1d1d', '#2d3d6b', '#b48a2c']), shieldX: '#e8dccb', flag: pick(['jerusalem', 'red', 'red']) });
+  if (type === 'mounted') { if (fac !== 'plain') { u.capa = u.tab; u.capaX = u.tabX; } u.helm = fac === 'plain' ? 'nasal' : 'great'; u.weapon = 'lance'; }
+  else u.helm = type === 'knight' ? (fac === 'plain' ? 'nasal' : 'great') : type === 'spear' ? pick(['kettle', 'nasal', 'kettle']) : type === 'archer' ? 'hood' : 'nasal';
+  return u;
+}
+function saracen(type) {
+  const u = { side: 'S', sar: true, type, ph: rnd(0, TAU), fo: rnd(0, TAU), k: rnd(0.94, 1.06), m: 0, act: 'stand',
+    tab: pick(COL.sarTunic), shield: pick(COL.round), flag: pick(['ayy', 'ayy', 'ayy2', 'green']), turbCol: pick(COL.turban) };
+  u.helm = Math.random() < 0.55 ? 'turban' : 'spike'; u.turbSpike = Math.random() < 0.4;
+  if (type === 'mounted') { u.weapon = 'lance'; u.capa = Math.random() < 0.3 ? pick(['#6b2a2a', '#2f3f5a', '#7a5a2a']) : null; }
+  if (type === 'horsearcher') { u.type = 'mounted'; u.weapon = 'bow'; }
+  return u;
+}
+const CMIX = r => r < 0.3 ? 'spear' : r < 0.5 ? 'knight' : r < 0.6 ? 'archer' : r < 0.68 ? 'banner' : 'mounted';
+const SMIX = r => r < 0.28 ? 'spear' : r < 0.52 ? 'archer' : r < 0.62 ? 'knight' : r < 0.67 ? 'banner' : r < 0.84 ? 'mounted' : 'horsearcher';
+
+const ROWS_Y = [0.668, 0.69, 0.722, 0.76, 0.805];
+const sOfY = y => 0.3 + (y - 0.645) / 0.355 * 0.95;
+let rows = [], front = [], arrows = [], sparks = [], dustB = [], dustF = [], birds = [], fleers = [], charge = null;
+
+function buildBattle(spreadC, spreadS) {
+  rows = ROWS_Y.map(yf => ({ y: yf * H, s: sOfY(yf), rk: rankStyle(sOfY(yf)), units: [] }));
+  for (const R of rows) {
+    const h = R.rk.h;
+    for (const [side, a, b] of [['C', spreadC[0], spreadC[1]], ['S', spreadS[0], spreadS[1]]]) {
+      let px = a * W;
+      while (px < b * W) {
+        const u = side === 'C' ? crusader(CMIX(Math.random())) : saracen(SMIX(Math.random()));
+        u.bx = px; u.x = px; u.px = px; u.routDelay = rnd(0, 2.5); u.routSp = rnd(0.8, 1.25); u.dy = rnd(-0.004, 0.004) * H;
+        R.units.push(u);
+        px += h * (u.type === 'mounted' ? rnd(0.85, 1.1) : rnd(0.3, 0.5));
+      }
+    }
+    if (spreadS[0] < 2 && R === rows[rows.length - 1]) {
+      const sal = { side: 'S', sar: true, type: 'mounted', weapon: 'sword', saladin: true, tab: '#efe6d6', capa: '#d9a925', helm: 'turban', turbCol: '#efe6d6', turbSpike: true,
+        horse: '#5a3a2a', shield: '#c9a23a', ph: 0, fo: 1, k: 1.04, m: 0, act: 'stand', bx: 1.0 * W, routDelay: -0.8, routSp: 1.35, dy: 0 };
+      const bearer = Object.assign(saracen('mounted'), { big: true, flag: 'ayy', bx: 1.07 * W, routDelay: -0.6, routSp: 1.3, dy: 0, capa: '#d9a925' });
+      for (const u of [sal, bearer]) { u.x = u.px = u.bx; R.units.push(u); }
+    }
+    // pack order (0 = front of their side) used when the lines compress into a melee
+    const cs = R.units.filter(u => u.side === 'C').sort((p, q) => q.bx - p.bx), ss = R.units.filter(u => u.side === 'S').sort((p, q) => p.bx - q.bx);
+    cs.forEach((u, i) => u.pack = i); ss.forEach((u, i) => u.pack = i);
+  }
+}
+
+// ------------------------------------------------------------------ scenery
+function buildSky() {
+  skyC = off(W, H); const g = skyC.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#0d1638'); sky.addColorStop(0.3, '#2c2a5c'); sky.addColorStop(0.55, '#8a3f6a');
+  sky.addColorStop(0.76, '#e0785a'); sky.addColorStop(0.9, '#f8b562'); sky.addColorStop(1, '#ffe2a0');
+  g.fillStyle = sky; g.fillRect(0, 0, W, horizon + 2);
+  for (let i = 0; i < 140; i++) {   // the last stars fading out
+    const yy = rnd(0, horizon * 0.35);
+    g.globalAlpha = rnd(0.2, 0.75) * (1 - yy / (horizon * 0.35)); g.fillStyle = '#eef2ff';
+    const s = rnd(0.6, 1.7) * U; g.fillRect(rnd(0, W), yy, s, s);
+  }
+  g.globalAlpha = 1;
+  SUN = { x: 0.52 * W, y: horizon - 0.025 * H, r: 0.065 * H };
+  let gl = g.createRadialGradient(SUN.x, SUN.y, SUN.r * 0.4, SUN.x, SUN.y, SUN.r * 10);
+  gl.addColorStop(0, 'rgba(255,236,170,0.95)'); gl.addColorStop(0.2, 'rgba(255,170,90,0.4)'); gl.addColorStop(1, 'rgba(255,140,90,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, W, horizon);
+  for (let i = 0; i < 11; i++) {   // dawn clouds, gold on their bellies
+    const cy = rnd(0.12, 0.42) * H, cx = rnd(0, W), cw = rnd(0.15, 0.4) * W, ch = rnd(6, 15) * U;
+    const cg = g.createLinearGradient(0, cy - ch, 0, cy + ch);
+    cg.addColorStop(0, 'rgba(90,50,110,0.0)'); cg.addColorStop(0.55, 'rgba(240,140,140,0.3)'); cg.addColorStop(1, 'rgba(255,214,140,0.55)');
+    g.fillStyle = cg; g.beginPath(); g.ellipse(cx, cy, cw / 2, ch, 0, 0, TAU); g.fill();
+  }
+  g.fillStyle = '#fff6da'; g.beginPath(); g.arc(SUN.x, SUN.y, SUN.r, 0, TAU); g.fill();
+  gl = g.createRadialGradient(SUN.x, SUN.y, SUN.r * 0.2, SUN.x, SUN.y, SUN.r * 1.3);
+  gl.addColorStop(0, 'rgba(255,255,240,1)'); gl.addColorStop(0.7, 'rgba(255,232,160,0.9)'); gl.addColorStop(1, 'rgba(255,200,110,0)');
+  g.fillStyle = gl; g.beginPath(); g.arc(SUN.x, SUN.y, SUN.r * 1.3, 0, TAU); g.fill();
+  drawCity(g);
+  const ground = g.createLinearGradient(0, horizon, 0, H);
+  ground.addColorStop(0, '#f0b77a'); ground.addColorStop(0.07, '#c98352'); ground.addColorStop(0.45, '#7e4a33'); ground.addColorStop(1, '#2e1a17');
+  g.fillStyle = ground; g.fillRect(0, horizon, W, H - horizon);
+  const glare = g.createRadialGradient(SUN.x, horizon, 0, SUN.x, horizon, 0.5 * W);
+  glare.addColorStop(0, 'rgba(255,220,150,0.6)'); glare.addColorStop(1, 'rgba(255,190,120,0)');
+  g.save(); g.translate(SUN.x, horizon); g.scale(1, 0.16); g.translate(-SUN.x, -horizon);
+  g.fillStyle = glare; g.fillRect(0, horizon, W, H); g.restore();
+}
+
+function drawCity(g) {
+  const col = '#3a1f30', base = horizon - 0.012 * H;
+  g.fillStyle = mixc(col, HAZE, 0.3);
+  g.beginPath(); g.moveTo(0.3 * W, horizon + 1);
+  g.bezierCurveTo(0.36 * W, base - 0.01 * H, 0.62 * W, base - 0.012 * H, 0.72 * W, horizon + 1); g.closePath(); g.fill();
+  g.fillStyle = col;
+  const wy = base - 0.006 * H, x0 = 0.36 * W, x1 = 0.66 * W, wh = 0.018 * H;
+  TOWERS = [];
+  for (let i = 0; i < 80; i++) {
+    const bx = rnd(x0, x1), bw = rnd(0.004, 0.012) * W, bh = rnd(0.012, 0.032) * H;
+    g.fillRect(bx, wy - bh, bw, bh);
+    if (Math.random() < 0.25) { g.beginPath(); g.arc(bx + bw / 2, wy - bh, bw * 0.38, Math.PI, 0); g.fill(); }
+  }
+  // Holy Sepulchre
+  dome(g, 0.47 * W, wy - 0.036 * H, 0.0065 * W, 0.012 * H, col, false);
+  g.fillRect(0.46 * W, wy - 0.036 * H, 0.02 * W, 0.036 * H);
+  g.fillRect(0.483 * W, wy - 0.052 * H, 0.004 * W, 0.052 * H);
+  // Dome of the Rock, in front of the rising sun
+  const dx = 0.52 * W;
+  g.fillRect(dx - 0.02 * W, wy - 0.03 * H, 0.04 * W, 0.03 * H);
+  g.fillRect(dx - 0.012 * W, wy - 0.04 * H, 0.024 * W, 0.012 * H);
+  dome(g, dx, wy - 0.04 * H, 0.0125 * W, 0.024 * H, col, true);
+  g.fillRect(dx - 0.0007 * W, wy - 0.073 * H, 0.0014 * W, 0.01 * H);
+  // Tower of David: the main banner goes up here
+  const tdx = 0.375 * W, tdy = wy - 0.065 * H;
+  g.fillRect(tdx, tdy, 0.013 * W, 0.065 * H); crenels(g, tdx, tdx + 0.013 * W, tdy, 0.0025 * W);
+  TOWERS.push({ x: tdx + 0.0065 * W, y: tdy - 0.0015 * H, main: true });
+  g.fillRect(x0, wy - wh, x1 - x0, wh + 0.006 * H); crenels(g, x0, x1, wy - wh, 0.003 * W);
+  for (let tx = x0 + 0.02 * W; tx < x1; tx += rnd(0.03, 0.045) * W) {
+    g.fillRect(tx, wy - wh * 1.75, 0.007 * W, wh * 1.75); crenels(g, tx, tx + 0.007 * W, wy - wh * 1.75, 0.0022 * W);
+    TOWERS.push({ x: tx + 0.0035 * W, y: wy - wh * 1.75 - 0.001 * H });
+  }
+  // gold edge where the sun catches the stone
+  g.strokeStyle = 'rgba(255,214,140,0.55)'; g.lineWidth = 1.2 * U;
+  g.beginPath(); g.moveTo(x0, wy - wh); g.lineTo(x1, wy - wh); g.stroke();
+  g.fillStyle = mixc(col, '#000', 0.2);
+  for (let i = 0; i < 16; i++) { const cx = rnd(0.375, 0.65) * W, ch = rnd(0.012, 0.028) * H; g.beginPath(); g.ellipse(cx, wy + 0.004 * H - ch / 2, 0.0018 * W, ch / 2, 0, 0, TAU); g.fill(); }
+  if (MODE === 'victory') {   // defenders on the walls
+    for (let px = x0 + 0.004 * W; px < x1; px += rnd(0.004, 0.009) * W) {
+      g.fillStyle = col; const hh = 0.009 * H;
+      g.fillRect(px, wy - wh - hh, 0.0012 * W, hh); g.beginPath(); g.arc(px + 0.0006 * W, wy - wh - hh - 0.0018 * H, 0.0018 * H, 0, TAU); g.fill();
+      if (Math.random() < 0.5) g.fillRect(px + 0.0015 * W, wy - wh - hh * 2.1, 0.0004 * W, hh * 2.1);
+    }
+  }
+}
+function crenels(g, a, b, y, step) { for (let px = a; px < b - step * 0.4; px += step) g.fillRect(px, y - step * 0.55, step * 0.55, step * 0.55); }
+function dome(g, cx, cy, rx, ry, col, gold) {
+  if (gold) { const d = g.createLinearGradient(cx - rx, 0, cx + rx, 0); d.addColorStop(0, '#5a3020'); d.addColorStop(0.6, '#a87430'); d.addColorStop(1, '#ffdc80'); g.fillStyle = d; }
+  g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, Math.PI, 0); g.fill();
+  if (gold) { g.strokeStyle = 'rgba(255,230,160,0.9)'; g.lineWidth = 1.4 * U; g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, Math.PI, 0); g.stroke(); }
+  g.fillStyle = col;
+}
+function rippleTile(top, bottom, count, light, dark) {
+  const o = off(W, bottom - top), g = o.getContext('2d'), bh = bottom - top; g.lineCap = 'round';
+  for (let i = 0; i < count; i++) {
+    const yy = rnd(0, bh), k = 0.4 + (top + yy - horizon) / (H - horizon), w = rnd(14, 60) * U * k, xx = rnd(0, W);
+    for (const dx of [0, -W, W]) {
+      g.strokeStyle = dark; g.lineWidth = 1.6 * U * k; g.beginPath(); g.moveTo(xx + dx, yy + 1.2 * U * k); g.quadraticCurveTo(xx + dx + w / 2, yy - 3 * U * k, xx + dx + w, yy + 1.2 * U * k); g.stroke();
+      g.strokeStyle = light; g.lineWidth = 1.1 * U * k; g.beginPath(); g.moveTo(xx + dx, yy); g.quadraticCurveTo(xx + dx + w / 2, yy - 4 * U * k, xx + dx + w, yy); g.stroke();
+    }
+  }
+  return { c: o, top, w: W };
+}
+function duneTile(w, top, bottom, amp, harm, fill, ridge, rw) {
+  const o = off(w, bottom - top + 2), g = o.getContext('2d'), N = 260, hs = [], ph = harm.map(() => rnd(0, TAU));
+  for (let i = 0; i <= N; i++) { let v = 0; harm.forEach((k, j) => v += Math.sin(i / N * TAU * k + ph[j]) / (j + 1)); hs.push((bottom - top) - amp * (0.55 + 0.45 * v)); }
+  g.fillStyle = fill; g.beginPath(); g.moveTo(0, o.height); hs.forEach((y, i) => g.lineTo(i / N * w, y)); g.lineTo(w, o.height); g.closePath(); g.fill();
+  g.strokeStyle = ridge; g.lineWidth = rw; g.beginPath(); hs.forEach((y, i) => i ? g.lineTo(i / N * w, y + rw / 2) : g.moveTo(0, y + rw / 2)); g.stroke();
+  return { c: o, top, w };
+}
+function foreTile() {
+  const w = W * 2, top = 0.88 * H, o = off(w, H - top), g = o.getContext('2d'), bh = H - top, N = 400, hs = [], ph = [rnd(0, TAU), rnd(0, TAU)];
+  for (let i = 0; i <= N; i++) { const u = i / N; hs.push(bh - (0.02 * H + Math.pow(Math.max(0, Math.sin(u * TAU * 2 + ph[0])), 3) * 0.055 * H + Math.sin(u * TAU * 7 + ph[1]) * 0.005 * H)); }
+  const fg = g.createLinearGradient(0, 0, 0, bh); fg.addColorStop(0, '#3a2018'); fg.addColorStop(1, '#140a08');
+  g.fillStyle = fg; g.beginPath(); g.moveTo(0, bh); hs.forEach((y, i) => g.lineTo(i / N * w, y)); g.lineTo(w, bh); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(255,190,120,0.55)'; g.lineWidth = 2 * U; g.beginPath(); hs.forEach((y, i) => i ? g.lineTo(i / N * w, y + U) : g.moveTo(0, y + U)); g.stroke();
+  g.strokeStyle = '#120806'; g.fillStyle = '#120806'; g.lineCap = 'round';
+  for (let i = 0; i < 24; i++) {
+    const idx = Math.floor(rnd(0, N)), bx = idx / N * w, by = hs[idx] + 2 * U;
+    if (Math.random() < 0.6) for (let k = 0; k < 9; k++) { const a = rnd(-1.1, 1.1), l = rnd(10, 34) * U; g.lineWidth = rnd(1.2, 2.4) * U; g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + Math.sin(a) * l * 0.4, by - l * 0.6, bx + Math.sin(a) * l, by - Math.cos(a) * l); g.stroke(); }
+    else { g.beginPath(); g.ellipse(bx, by, rnd(8, 22) * U, rnd(5, 11) * U, 0, Math.PI, 0); g.fill(); }
+  }
+  return { c: o, top, w };
+}
+function drawTile(T, sp) {
+  const ox = -(((scroll * sp) % T.w) + T.w) % T.w;
+  x.drawImage(T.c, ox, T.top); x.drawImage(T.c, ox + T.w, T.top); if (ox + 2 * T.w < W) x.drawImage(T.c, ox + 2 * T.w, T.top);
+}
+
+// ------------------------------------------------------------------ light, dust, arrows, sparks
+function godRays(t, k) {
+  if (k <= 0) return;
+  x.save(); x.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 14; i++) {
+    const a = -Math.PI / 2 + (i - 6.5) * 0.17 + Math.sin(t * 0.00011 + i * 1.7) * 0.05;
+    const L = H * 1.1, w = 0.035 + 0.025 * Math.sin(i * 2.3 + t * 0.0003);
+    const g = x.createRadialGradient(SUN.x, SUN.y, SUN.r, SUN.x, SUN.y, L);
+    g.addColorStop(0, `rgba(255,225,160,${0.1 * k})`); g.addColorStop(1, 'rgba(255,200,140,0)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(SUN.x, SUN.y);
+    x.lineTo(SUN.x + Math.cos(a - w) * L, SUN.y + Math.sin(a - w) * L); x.lineTo(SUN.x + Math.cos(a + w) * L, SUN.y + Math.sin(a + w) * L); x.closePath(); x.fill();
+  }
+  x.restore();
+}
+function crossGlow(px, py, h, k, t) {
+  if (k <= 0) return;
+  x.save(); x.globalCompositeOperation = 'lighter';
+  const r = h * (0.6 + 0.6 * k) * (1 + 0.05 * Math.sin(t * 0.004));
+  const g = x.createRadialGradient(px, py, 0, px, py, r);
+  g.addColorStop(0, `rgba(255,248,220,${0.75 * k})`); g.addColorStop(0.25, `rgba(255,215,130,${0.35 * k})`); g.addColorStop(1, 'rgba(255,190,100,0)');
+  x.fillStyle = g; x.fillRect(px - r, py - r, r * 2, r * 2);
+  for (let i = 0; i < 10; i++) {
+    const a = i / 10 * TAU + t * 0.0002, L = r * 1.25, w = 0.045;
+    x.fillStyle = `rgba(255,230,170,${0.055 * k})`; x.beginPath(); x.moveTo(px, py);
+    x.lineTo(px + Math.cos(a - w) * L, py + Math.sin(a - w) * L); x.lineTo(px + Math.cos(a + w) * L, py + Math.sin(a + w) * L); x.closePath(); x.fill();
+  }
+  x.restore();
+}
+function makeDustSprite() {
+  dustSprite = off(128, 128); const g = dustSprite.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(236,184,128,1)'); gr.addColorStop(0.5, 'rgba(225,165,110,0.45)'); gr.addColorStop(1, 'rgba(215,150,100,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+}
+function spawnDust(list, px, py, s, vx, n, big) {
+  if (list.length > 320) return;
+  for (let i = 0; i < n; i++) list.push({ x: px + rnd(-20, 20) * U * s, y: py - rnd(0, 6) * U * s, vx: vx * rnd(0.3, 0.8) + rnd(-15, 15) * U * s, vy: -rnd(4, 18) * U * s,
+    r: rnd(8, 20) * U * s * (big ? 2.5 : 1), g: rnd(6, 16) * U * s * (big ? 2 : 1), life: 0, max: rnd(1.6, 3.2), a: rnd(0.12, 0.24) });
+}
+function drawDust(list, dt) {
+  for (const p of list) {
+    p.life += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.g * dt;
+    const a = p.a * Math.sin(Math.PI * clamp(p.life / p.max, 0, 1)); if (a <= 0) continue;
+    x.globalAlpha = a; x.drawImage(dustSprite, p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+  }
+  x.globalAlpha = 1;
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].life >= list[i].max) list.splice(i, 1);
+}
+function fireArrow(sx, sy, tx, ty) {
+  if (arrows.length > 260) return;
+  const T = rnd(1.2, 1.6), g = 0.75 * H;
+  arrows.push({ x: sx, y: sy, vx: (tx - sx) / T, vy: (ty - sy) / T - 0.5 * g * T, g, life: 0, land: T, stuck: 0 });
+}
+function drawArrows(dt) {
+  x.strokeStyle = '#1a0f14'; x.lineWidth = 1.6 * U; x.beginPath();
+  for (const a of arrows) {
+    if (a.life < a.land) { a.life += dt; a.vy += a.g * dt; a.x += a.vx * dt; a.y += a.vy * dt; } else a.stuck += dt;
+    const sp = Math.hypot(a.vx, a.vy) || 1, L = 14 * U;
+    x.moveTo(a.x, a.y); x.lineTo(a.x - a.vx / sp * L, a.y - a.vy / sp * L);
+  }
+  x.stroke();
+  arrows = arrows.filter(a => a.stuck < 1.4);
+}
+function spark(px, py, s) { if (sparks.length < 120) sparks.push({ x: px, y: py, s, life: 0, max: rnd(0.12, 0.28) }); }
+function drawSparks(dt) {
+  if (!sparks.length) return;
+  x.save(); x.globalCompositeOperation = 'lighter'; x.lineCap = 'round';
+  for (const p of sparks) {
+    p.life += dt; const k = 1 - p.life / p.max; if (k <= 0) continue;
+    const r = 22 * U * p.s * (0.5 + k);
+    x.strokeStyle = `rgba(255,240,200,${k})`; x.lineWidth = 2 * U * p.s;
+    x.beginPath(); x.moveTo(p.x - r, p.y); x.lineTo(p.x + r, p.y); x.moveTo(p.x, p.y - r); x.lineTo(p.x, p.y + r);
+    x.moveTo(p.x - r * 0.5, p.y - r * 0.5); x.lineTo(p.x + r * 0.5, p.y + r * 0.5); x.stroke();
+  }
+  x.restore();
+  sparks = sparks.filter(p => p.life < p.max);
+}
+function overlay(col, a) { if (a <= 0.002) return; x.globalAlpha = a; x.fillStyle = col; x.fillRect(0, 0, W, H); x.globalAlpha = 1; }
+
+// ------------------------------------------------------------------ drawing a row (two facings)
+function drawUnitInto(B, u, X, gy, rk, t) {
+  if (u.kneel !== undefined && u.kneel >= 0) kneeling(B, u, X, gy, rk, t, u.kneel);
+  else if (u.type === 'mounted') mounted(B, u, X, gy, rk, t); else foot(B, u, X, gy, rk, t);
+}
+function drawGroup(list, rk, t, rimOn) {
+  const R = new Batch(), L = new Batch();
+  for (const [u, gy] of list) {
+    if (u.x < -1.6 * rk.h || u.x > W + 1.6 * rk.h) continue;
+    if (u.face < 0) drawUnitInto(L, u, -u.x, gy, rk, t); else drawUnitInto(R, u, u.x, gy, rk, t);
+  }
+  const rim = rimOn ? { dx: 0, dy: -0.008 * rk.h, col: rk.rim } : null;
+  R.flush(rim); drawFlags(R.flags, t);
+  x.save(); x.scale(-1, 1); L.flush(rim); drawFlags(L.flags, t); x.restore();
+  return R.glows.concat(L.glows.map(([gx, gy2, h]) => [-gx, gy2, h]));
+}
+
+// ------------------------------------------------------------------ the battle director
+// Positions are functions of the loop time, so the loop always resets cleanly.
+const BT = { kneelEnd: 14, flash: 15.5, ready: 17, charge: 20, contact: 30, rout: 46, pursuitEnd: 57, cheer: 58, banner: 60, bannerUp: 66, end: 96 };
+const CLASH = 0.56;
+function battleState(bt) {
+  return {
+    crusOff: smooth(ramp(bt, BT.charge, BT.contact)) * 0.3 * W + Math.pow(ramp(bt, BT.charge, BT.contact), 2) * 0.05 * W,
+    sarAdv: ramp(bt, 0, BT.contact) * 0.13 * W,
+    pursuit: smooth(ramp(bt, BT.rout, BT.pursuitEnd)) * 0.17 * W,
+    lance: smooth(ramp(bt, BT.ready, BT.charge)) * (1 - smooth(ramp(bt, BT.cheer, BT.cheer + 2))),
+    melee: bt >= BT.contact - 1 && bt < BT.rout + 1,
+    volley: bt >= BT.ready + 1 && bt < BT.contact - 3,
+    banner: smooth(ramp(bt, BT.banner, BT.bannerUp)), extra: smooth(ramp(bt, BT.bannerUp, BT.bannerUp + 3)),
+    cheer: bt >= BT.cheer, rays: 0.45 + 0.55 * smooth(ramp(bt, BT.banner, BT.bannerUp + 2)),
+  };
+}
+function routOff(bt, u) { const r = Math.max(0, bt - BT.rout - u.routDelay); return (r * r * 0.004 + r * 0.035) * W * u.routSp; }
+
+function updateBattle(bt, dt, t) {
+  const S = battleState(bt), clashX = CLASH * W;
+  for (const R of rows) {
+    const gap = R.rk.h * 0.48;
+    for (const u of R.units) {
+      if (u.side === 'C') {
+        const lim = clashX - 0.008 * W - u.pack * gap;
+        let px = Math.min(u.bx + S.crusOff, lim);
+        if (bt >= BT.rout) px = Math.min(u.bx + 0.35 * W, lim) + S.pursuit * (0.7 + 0.3 * (u.k - 0.94) / 0.12);
+        u.x = px; u.face = 1;
+      } else {
+        const lim = clashX + 0.008 * W + u.pack * gap;
+        let px = Math.max(u.bx - S.sarAdv, lim);
+        if (bt >= BT.rout) { px = Math.max(u.bx - 0.13 * W, lim) + routOff(bt, u); }
+        u.x = px; u.face = bt >= BT.rout + u.routDelay ? 1 : -1;
+      }
+    }
+  }
+  if (S.melee) for (const R of rows) for (const u of R.units) {
+    const d = Math.abs(u.x - clashX);
+    if (d < 0.1 * W) u.x += Math.sin(t * 0.0032 + u.fo * 3) * 0.007 * W * (1 - d / (0.1 * W));
+  }
+  animate(bt, dt, t, S);
+  if (S.melee && Math.random() < dt * 7) {
+    const R = pick(rows); spawnDust(dustB, clashX + rnd(-0.05, 0.05) * W, R.y, R.s, rnd(-30, 30) * U, 1, true);
+  }
+  return S;
+}
+function animate(bt, dt, t, S) {
+  const clashX = CLASH * W;
+  for (const R of rows) for (const u of R.units) {
+    const vx = dt > 0 ? (u.x - u.px) / dt : 0; u.px = u.x;
+    const sp = Math.abs(vx) / (R.rk.h);           // body-heights per second
+    const target = sp < 0.05 ? 0 : sp < 1.2 ? 1 : 1.6;
+    u.m += (target - u.m) * Math.min(1, dt * 4);
+    const stride = u.type === 'mounted' ? 1.15 * R.rk.h : 0.735 * R.rk.h;
+    u.ph += TAU * (Math.abs(vx) / stride + (u.m < 0.05 ? 0 : 0)) * dt;
+    const near = Math.abs(u.x - clashX) < (u.type === 'mounted' ? 0.06 : 0.045) * W;
+    u.act = S.melee && near ? 'fight' : sp > 1.2 ? 'run' : sp > 0.05 ? 'walk' : 'stand';
+    if (u.side === 'C' && S.cheer) u.act = 'cheer';
+    if (u.side === 'S' && u.type === 'archer' && S.volley) {
+      u.act = 'shoot';
+      if (Math.random() < dt * 0.45) fireArrow(u.x - 0.15 * R.rk.h, R.y - 0.6 * R.rk.h, rnd(0.08, 0.42) * W + (S.crusOff || 0) * 0.6, pick(ROWS_Y) * H + rnd(0, 0.01) * H);
+    }
+    if (u.side === 'C' && u.type === 'mounted') u.lance = S.lance;
+    if (S.melee && near && Math.random() < dt * 1.6) spark(u.x + (u.side === 'C' ? 1 : -1) * 0.25 * R.rk.h, R.y - rnd(0.3, 0.8) * R.rk.h, R.s);
+    if (u.m > 1.1 && Math.random() < dt * 0.8) spawnDust(dustB, u.x, R.y, R.s, -vx * 0.2, 1);
+  }
+}
+
+// ------------------------------------------------------------------ front groups (foreground heroes)
+function makeBattleFront() {
+  const C = (o) => Object.assign({ side: 'C', ph: rnd(0, TAU), fo: rnd(0, TAU), k: 1, m: 0, act: 'stand', face: 1 }, o);
+  return [
+    { gy: 0.885, s: 0.88, base: 0.03, u: C({ type: 'mounted', fac: 'templar', tab: COL.templar, tabX: COL.templarX, capa: COL.templar, capaX: COL.templarX, shield: COL.templar, shieldX: COL.templarX, helm: 'great', flag: 'beauseant', big: true }) },
+    { gy: 0.895, s: 0.9, base: 0.11, u: C({ type: 'mounted', fac: 'plain', tab: '#2d3d6b', tabX: COL.gold, helm: 'nasal', flag: 'jerusalem', big: true, horse: '#4a2c1c' }) },
+    { gy: 0.905, s: 0.92, base: 0.19, u: C({ type: 'mounted', fac: 'hosp', tab: COL.hosp, tabX: COL.hospX, capa: COL.hosp, capaX: COL.hospX, shield: COL.hosp, shieldX: COL.hospX, helm: 'great', flag: 'hosp', weapon: 'lance', horse: '#3a2418' }) },
+    { gy: 0.935, s: 1.05, base: 0.235, role: 'king', u: C({ type: 'mounted', king: true, weapon: 'sword', tab: '#e4d8c6', tabX: COL.gold, capa: '#ece2d2', capaX: COL.gold, horse: '#e9ddd0' }) },
+    { gy: 0.94, s: 0.98, base: 0.355, role: 'bishop', u: C({ type: 'bishop', robe: '#efe6d6', helm: 'mitre', tab: null, face: -1 }) },
+  ];
+}
+function updateBattleFront(bt, dt, t, S) {
+  const glows = [];
+  for (const e of front) {
+    const u = e.u, rk = rankStyle(e.s);
+    if (e.role === 'bishop') {
+      u.x = e.base * W; u.face = bt < BT.ready ? -1 : 1;
+    } else {
+      const lim = (CLASH - 0.05) * W - (0.235 - e.base) * 0.6 * W;
+      u.x = bt < BT.rout ? Math.min(e.base * W + S.crusOff * 0.95, lim)
+        : Math.min(e.base * W + 0.35 * W * 0.95, lim) + S.pursuit * 0.9;
+    }
+    if (e.role === 'king') u.noRider = bt < BT.flash;
+  }
+  // animate front units with the same rules
+  for (const e of front) {
+    const u = e.u, rk = rankStyle(e.s), vx = dt > 0 ? (u.x - (u.px ?? u.x)) / dt : 0; u.px = u.x;
+    const sp = Math.abs(vx) / rk.h, target = sp < 0.05 ? 0 : sp < 1.2 ? 1 : 1.6;
+    u.m += (target - u.m) * Math.min(1, dt * 4);
+    u.ph += TAU * Math.abs(vx) / ((u.type === 'mounted' ? 1.15 : 0.735) * rk.h) * dt;
+    u.act = S.cheer ? 'cheer' : (S.melee && Math.abs(u.x - CLASH * W) < 0.08 * W) ? 'fight' : sp > 1.2 ? 'run' : 'stand';
+    if (u.type === 'mounted' && u.weapon === 'lance') u.lance = S.lance;
+    if (u.m > 1.1 && Math.random() < dt * 3) spawnDust(dustF, u.x, e.gy * H, e.s, -vx * 0.2, 1);
+  }
+  return glows;
+}
+function drawFront(list, t, dt) {
+  const glows = [];
+  for (const e of list.slice().sort((a, b) => a.gy - b.gy)) {
+    const rk = rankStyle(e.s), u = e.u;
+    const B = new Batch(), mirror = u.face < 0;
+    if (u.king && u.noRider) {   // riderless horse waits while the king kneels
+      mounted(B, u, u.x, e.gy * H, rk, t);
+      const K = new Batch(); kneeling(K, u, (e.kneelX ?? 0.3) * W, e.gy * H + 0.004 * H, rk, t, 0);
+      flushWith(B, rk, mirror, t, u); flushWith(K, rk, false, t, u);
+      continue;
+    }
+    drawUnitInto(B, u, mirror ? -u.x : u.x, e.gy * H, rk, t);
+    glows.push(...flushWith(B, rk, mirror, t, u));
+    if (u.king && u.glint && !u.noRider) glint(u.glint[0], u.glint[1], t);
+  }
+  return glows;
+}
+function flushWith(B, rk, mirror, t, u) {
+  const rim = { dx: 0, dy: -0.008 * rk.h, col: u.king ? '#ffe2a8' : rk.rim };
+  if (mirror) { x.save(); x.scale(-1, 1); B.flush(rim); drawFlags(B.flags, t); x.restore(); return B.glows.map(([a, b, h]) => [-a, b, h]); }
+  B.flush(rim); drawFlags(B.flags, t); return B.glows;
+}
+function glint(gx, gy, t) {
+  const k = 0.55 + 0.45 * Math.pow(Math.max(0, Math.sin(t * 0.0011)), 6), r = 30 * U * k;
+  x.save(); x.globalCompositeOperation = 'lighter';
+  const g = x.createRadialGradient(gx, gy, 0, gx, gy, r);
+  g.addColorStop(0, 'rgba(255,248,225,0.95)'); g.addColorStop(0.3, 'rgba(255,210,130,0.35)'); g.addColorStop(1, 'rgba(255,190,100,0)');
+  x.fillStyle = g; x.fillRect(gx - r, gy - r, r * 2, r * 2); x.restore();
+}
+
+// ------------------------------------------------------------------ city banners
+function cityBanners(t, main, extra) {
+  const list = [], pole = new Path2D();
+  TOWERS.forEach((tw, i) => {
+    const k = tw.main ? main : clamp(extra * 1.6 - (i / TOWERS.length) * 0.6, 0, 1);
+    if (k <= 0) return;
+    const ph = (tw.main ? 0.08 : 0.032) * H, top = tw.y - ph;
+    pole.moveTo(tw.x, tw.y); pole.lineTo(tw.x, top);
+    const fh = (tw.main ? 0.032 : 0.011) * H, fy = lerp(tw.y - fh * 1.1, top, k);
+    list.push({ x: tw.x, y: fy, len: fh * 1.6, ht: fh, d: tw.main ? 'jerusalem' : (i % 3 === 0 ? 'templar' : 'jerusalem'), o: i * 1.3, f: 0.35, taper: 0.05, big: tw.main });
+  });
+  x.strokeStyle = '#3a1f30'; x.lineWidth = 1.4 * U; x.stroke(pole);
+  drawFlags(list, t);
+  if (main > 0.98) {   // the moment the city is theirs: a warm pulse over the walls
+    const p = TOWERS[0], g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, 0.35 * W);
+    x.save(); x.globalCompositeOperation = 'lighter';
+    g.addColorStop(0, `rgba(255,220,150,${0.18 * (0.6 + 0.4 * Math.sin(t * 0.002))})`); g.addColorStop(1, 'rgba(255,200,120,0)');
+    x.fillStyle = g; x.fillRect(p.x - 0.35 * W, p.y - 0.35 * W, 0.7 * W, 0.7 * W); x.restore();
+  }
+}
+
+// ------------------------------------------------------------------ victory tableau
+function buildVictory() {
+  buildBattle([-0.05, 0.62], [5, 5]);
+  for (const R of rows) for (const u of R.units) { u.x = u.bx; u.face = 1; u.act = 'cheer'; u.m = 0; u.ph = 0; if (u.type === 'mounted') u.lance = 0; }
+  front = [
+    { gy: 0.89, s: 0.88, u: Object.assign(crusader('mounted'), { x: 0.06 * W, big: true, flag: 'beauseant', fac: 'templar', tab: COL.templar, tabX: COL.templarX, capa: COL.templar, capaX: COL.templarX, helm: 'great', face: 1, act: 'cheer', m: 0 }) },
+    { gy: 0.9, s: 0.9, u: Object.assign(crusader('mounted'), { x: 0.15 * W, big: true, flag: 'jerusalem', tab: '#2d3d6b', tabX: COL.gold, helm: 'nasal', horse: '#4a2c1c', face: 1, act: 'cheer', m: 0 }) },
+    { gy: 0.935, s: 1.06, u: { side: 'C', type: 'mounted', king: true, weapon: 'sword', tab: '#e4d8c6', tabX: COL.gold, capa: '#ece2d2', capaX: COL.gold, horse: '#e9ddd0', x: 0.27 * W, face: 1, act: 'cheer', m: 0, ph: 0, fo: 0.5, k: 1 } },
+    { gy: 0.945, s: 0.98, u: { side: 'C', type: 'bishop', robe: '#efe6d6', helm: 'mitre', x: 0.38 * W, face: 1, act: 'stand', m: 0, ph: 0, fo: 1, k: 1 } },
+    { gy: 0.95, s: 1.0, u: Object.assign(crusader('knight'), { x: 0.47 * W, fac: 'hosp', tab: COL.hosp, tabX: COL.hospX, shield: COL.hosp, shieldX: COL.hospX, helm: 'great', face: 1, act: 'cheer', m: 0 }) },
+  ];
+  // Saladin's host streaming away over the far dunes
+  fleers = Array.from({ length: 70 }, () => ({ x: rnd(0.66, 1.1) * W, y: horizon + rnd(0.004, 0.02) * H, sp: rnd(0.025, 0.05) * W, ph: rnd(0, TAU), mt: Math.random() < 0.35 }));
+  birds = Array.from({ length: 14 }, () => ({ x: rnd(-0.3, 1) * W, y: rnd(0.1, 0.35) * H, sp: rnd(0.025, 0.05) * W, ph: rnd(0, TAU), sz: rnd(0.6, 1.1) }));
+}
+function drawFleers(dt) {
+  x.fillStyle = mixc(SIL, HAZE, 0.55); x.strokeStyle = x.fillStyle; x.lineWidth = 1.2 * U;
+  for (const f of fleers) {
+    f.x += f.sp * dt * 0.2; f.ph += dt * 10; if (f.x > 1.12 * W) f.x = 0.64 * W;
+    const s = 0.005 * H, bob = Math.abs(Math.sin(f.ph)) * s * 0.3;
+    if (f.mt) { x.fillRect(f.x - s * 1.4, f.y - s * 1.2 - bob, s * 2.8, s * 0.8); x.fillRect(f.x - s * 0.2, f.y - s * 2.6 - bob, s * 0.4, s * 1.4); }
+    else { x.fillRect(f.x - s * 0.2, f.y - s * 1.8 - bob, s * 0.45, s * 1.8); }
+    if (Math.random() < dt * 0.4) spawnDust(dustB, f.x - 0.01 * W, f.y, 0.25, 0, 1);
+  }
+}
+function drawBirds(dt, t) {
+  x.strokeStyle = mixc(SIL, HAZE, 0.25); x.lineCap = 'round';
+  for (const b of birds) {
+    b.x += b.sp * dt; if (b.x > 1.1 * W) { b.x = -0.1 * W; b.y = rnd(0.1, 0.35) * H; }
+    const fl = Math.sin(t * 0.012 + b.ph) * 0.6, sp = 16 * U * b.sz;
+    x.lineWidth = 2.2 * U * b.sz; x.beginPath();
+    x.moveTo(b.x - sp, b.y - sp * (0.2 + fl * 0.5)); x.quadraticCurveTo(b.x - sp * 0.45, b.y - sp * 0.3, b.x, b.y);
+    x.quadraticCurveTo(b.x + sp * 0.45, b.y - sp * 0.3, b.x + sp, b.y - sp * (0.2 + fl * 0.5)); x.stroke();
+  }
+}
+
+// ------------------------------------------------------------------ the charge (mode 3)
+function buildCharge() {
+  const ys = [0.715, 0.765, 0.83];
+  charge = { rows: ys.map(yf => ({ y: yf * H, s: sOfY(yf), rk: rankStyle(sOfY(yf)), units: [] })), waves: [], lastWave: -99 };
+  charge.rows.forEach((R, ri) => {
+    let px = -0.06 * W + ri * 0.03 * W;
+    while (px < 0.64 * W) {
+      const u = crusader('mounted'); u.cx = px; u.face = 1; u.lance = 1; u.m = 1.6; u.act = 'run'; u.sway = rnd(0, TAU);
+      R.units.push(u); px += R.rk.h * rnd(0.75, 1.0);
+    }
+  });
+  charge.king = { gy: 0.935, s: 1.05, u: { side: 'C', type: 'mounted', king: true, weapon: 'sword', tab: '#e4d8c6', tabX: COL.gold, capa: '#ece2d2', capaX: COL.gold, horse: '#e9ddd0', face: 1, act: 'run', m: 1.6, ph: 0, fo: 0.4, k: 1 } };
+  charge.banner = { gy: 0.905, s: 0.92, u: Object.assign(crusader('mounted'), { big: true, flag: 'jerusalem', tab: '#2d3d6b', tabX: COL.gold, helm: 'nasal', horse: '#4a2c1c', face: 1, act: 'run', m: 1.6 }) };
+}
+const CV = () => 430 * U;    // charge speed at depth 1
+function spawnWave(lt) {
+  const w = { t0: lt, rows: charge.rows.map(R => []) };
+  charge.rows.forEach((R, ri) => {
+    let px = 1.08 * W + rnd(0, 0.06) * W;
+    const n = 5 + Math.floor(rnd(0, 4));
+    for (let i = 0; i < n; i++) {
+      const u = saracen(SMIX(Math.random())); u.sx = px; u.m = 1; u.face = -1; u.hit = false; u.vS = rnd(60, 110) * U * R.s; u.vF = rnd(0.45, 0.62);
+      w.rows[ri].push(u); px += R.rk.h * rnd(0.35, 0.7);
+    }
+  });
+  charge.waves.push(w);
+}
+function drawCharge(lt, dt, t) {
+  if (lt - charge.lastWave > 9 && lt < 33) { spawnWave(lt); charge.lastWave = lt; }
+  const V = CV(), lineX = 0.66 * W;
+  charge.rows.forEach((R, ri) => {
+    const list = [];
+    for (const u of R.units) {
+      u.x = u.cx + Math.sin(t * 0.0009 + u.sway) * 0.012 * W;
+      u.ph += TAU * V * R.s / (1.15 * R.rk.h) * dt; u.act = 'run';
+      if (Math.random() < dt * 1.2) spawnDust(dustB, u.x - 0.3 * R.rk.h, R.y, R.s, -V * R.s * 0.6, 1);
+      list.push([u, R.y]);
+    }
+    for (const w of charge.waves) for (const u of w.rows[ri]) {
+      const rel = V * R.s;
+      if (!u.hit) {
+        u.sx -= (rel + u.vS) * dt; u.act = 'run'; u.face = -1;
+        u.ph += TAU * u.vS / ((u.type === 'mounted' ? 1.15 : 0.735) * R.rk.h) * dt;
+        if (u.sx < lineX + 0.2 * R.rk.h) {
+          u.hit = true;
+          for (let k = 0; k < 3; k++) spark(u.sx + rnd(-0.2, 0.2) * R.rk.h, R.y - rnd(0.4, 0.9) * R.rk.h, R.s);
+          spawnDust(dustB, u.sx, R.y, R.s, -rel * 0.5, 3, true);
+        }
+      } else {
+        u.sx -= (rel - rel * u.vF) * dt; u.face = 1; u.act = 'flee';
+        u.ph += TAU * rel * u.vF / ((u.type === 'mounted' ? 1.15 : 0.735) * R.rk.h) * dt;
+      }
+      u.x = u.sx; u.m = 1.6; list.push([u, R.y]);
+    }
+    drawGroup(list, R.rk, t, R.rk.rimOn);
+  });
+  charge.waves = charge.waves.filter(w => w.rows.some(r => r.some(u => u.sx > -0.3 * W)));
+  // heroes in front: the Jerusalem banner and the king, sword forward
+  for (const e of [charge.banner, charge.king]) {
+    const rk = rankStyle(e.s), u = e.u;
+    u.x = (e === charge.king ? 0.42 : 0.3) * W + Math.sin(t * 0.0007 + (e === charge.king ? 1 : 2)) * 0.015 * W;
+    u.ph += TAU * V * e.s / (1.15 * rk.h) * dt; u.m = 1.6; u.act = 'run';
+    const B = new Batch(); mounted(B, u, u.x, e.gy * H, rk, t); flushWith(B, rk, false, t, u);
+    if (u.king && u.glint) glint(u.glint[0], u.glint[1], t);
+    if (Math.random() < dt * 4) spawnDust(dustF, u.x - 0.3 * rk.h, e.gy * H, e.s, -V * e.s * 0.6, 1);
+  }
+}
+
+// ------------------------------------------------------------------ setup
+// Tall / portrait screens (a laptop stood on end): the battlefield is laid out in screen-width fractions, so
+// squeezing it would crush the armies together. Instead, draw it at least MIN_AR wide and pan a camera
+// over it so the king stays in frame. Wide and ultrawide screens use the full width as-is.
+const MIN_AR = 0.95, FOCUS = { battle: 0.36, charge: 0.44, victory: 0.34 }[MODE] ?? 0.5;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const vw = innerWidth, vh = innerHeight, cw = Math.max(vw, Math.round(vh * MIN_AR));
+  const shift = clamp(FOCUS * cw - vw / 2, 0, cw - vw);
+  c.style.width = cw + 'px'; c.style.height = vh + 'px'; c.style.transform = shift ? `translateX(${-shift}px)` : '';
+  W = c.width = Math.round(cw * dpr); H = c.height = Math.round(vh * dpr);
+  U = H / 1000; horizon = 0.6 * H;
+  buildSky();
+  farDunes = duneTile(W * 2, horizon - 0.01 * H, horizon + 0.012 * H, 0.014 * H, [3, 7, 11], 'rgba(190,110,80,0.5)', 'rgba(255,205,140,0.35)', 1.2 * U);
+  ripA = rippleTile(horizon + 0.01 * H, 0.7 * H, 260, 'rgba(255,205,140,0.35)', 'rgba(90,40,30,0.25)');
+  ripB = rippleTile(0.7 * H, 0.84 * H, 220, 'rgba(255,195,130,0.3)', 'rgba(70,30,20,0.3)');
+  ripC = rippleTile(0.84 * H, H, 160, 'rgba(255,185,120,0.25)', 'rgba(50,20,15,0.35)');
+  fore = foreTile();
+  vign = off(W, H); { const g = vign.getContext('2d'), v = g.createRadialGradient(W * 0.5, H * 0.55, H * 0.35, W * 0.5, H * 0.55, Math.max(W * 0.75, H * 0.6));
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(8,4,16,0.55)'); g.fillStyle = v; g.fillRect(0, 0, W, H); }
+  makeDustSprite();
+  arrows = []; sparks = []; dustB = []; dustF = [];
+  if (MODE === 'victory') buildVictory();
+  else {
+    buildBattle([-0.13, 0.3], [0.73, 1.35]);
+    front = makeBattleFront(); front.find(e => e.role === 'king').kneelX = 0.3;
+    if (MODE === 'charge') buildCharge();
+  }
+}
+addEventListener('resize', resize); resize();
+
+// ------------------------------------------------------------------ frame
+const LOOP = { battle: BT.end, charge: 89, victory: 1e9 };
+let last = 0, prevLt = 0;
+function frame(now) {
+  if (startT === null) startT = now - T0 * 1000;
+  const t = now, dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
+  const lt = ((now - startT) / 1000) % LOOP[MODE];
+  if (lt < prevLt) { arrows = []; sparks = []; dustB = []; dustF = []; if (MODE === 'charge') { charge.waves = []; charge.lastWave = -99; } }
+  prevLt = lt;
+  x.lineCap = 'round'; x.lineJoin = 'round';
+
+  if (MODE === 'victory') return victoryFrame(t, dt);
+
+  let inCharge = MODE === 'charge' && lt < 40;
+  let bt = MODE === 'battle' ? lt : 44.5 + (lt - 40);
+  if (inCharge) scroll += CV() * dt; else scroll = 0;
+  const S = inCharge ? null : updateBattle(bt, dt, t);
+  if (!inCharge) updateBattleFront(bt, dt, t, S);
+
+  x.drawImage(skyC, 0, 0);
+  godRays(t, inCharge ? 0.5 : S.rays);
+  if (!inCharge) cityBanners(t, S.banner, S.extra);
+  drawTile(farDunes, 0.03);
+  drawTile(ripA, inCharge ? 0.4 : 0);
+  if (inCharge) { drawTile(ripB, 0.65); drawCharge(lt, dt, t); drawTile(ripC, 1.0); drawDust(dustB, dt); }
+  else {
+    rows.forEach((R, i) => {
+      if (i === 2) drawTile(ripB, 0);
+      const list = R.units.map(u => [u, R.y + u.dy]);
+      drawGroup(list, R.rk, t, R.rk.rimOn);
+      if (i === 2) drawDust(dustB, dt);
+    });
+    drawArrows(dt); drawSparks(dt);
+    drawTile(ripC, 0);
+    const glows = drawFront(front, t, dt);
+    const bishop = front.find(e => e.role === 'bishop');
+    if (glows.length) {
+      const k = MODE === 'battle' ? 0.55 + 0.45 * smooth(ramp(bt, 2, BT.kneelEnd)) + bump(bt, BT.kneelEnd, BT.flash, BT.ready) * 0.8 : 0.8;
+      for (const [gx, gy, h] of glows) crossGlow(gx, gy, h, Math.min(1.4, k), t);
+    }
+    if (MODE === 'battle') overlay('#fff4d8', bump(bt, BT.kneelEnd + 0.5, BT.flash, BT.flash + 1.2) * 0.85);
+  }
+  drawSparks(dt);
+  drawDust(dustF, dt);
+  drawTile(fore, inCharge ? 1.3 : 0);
+  x.drawImage(vign, 0, 0);
+  // fades: dawn in, dust whiteouts between the charge and the victory
+  if (MODE === 'battle') overlay('#120c16', Math.max(1 - ramp(lt, 0, 3), ramp(lt, BT.end - 3, BT.end)));
+  if (MODE === 'charge') overlay('#e6b98a', Math.max(bump(lt, 38, 40, 42), bump(lt, 86, 89, 92), 1 - ramp(lt, 0, 2)));
+  requestAnimationFrame(frame);
+}
+function victoryFrame(t, dt) {
+  x.drawImage(skyC, 0, 0);
+  godRays(t, 1);
+  drawBirds(dt, t);
+  cityBanners(t, 1, 1);
+  drawTile(farDunes, 0);
+  drawFleers(dt);
+  drawTile(ripA, 0);
+  rows.forEach((R, i) => {
+    if (i === 3) drawTile(ripB, 0);
+    for (const u of R.units) { u.act = Math.sin(t * 0.0009 - u.x / W * 6) > -0.2 ? 'cheer' : 'stand'; }
+    drawGroup(R.units.map(u => [u, R.y + u.dy]), R.rk, t, R.rk.rimOn);
+    if (i === 1) drawDust(dustB, dt);
+  });
+  drawTile(ripC, 0);
+  for (const e of front) e.u.act = e.u.type === 'bishop' ? 'stand' : 'cheer';
+  const glows = drawFront(front, t, dt);
+  for (const [gx, gy, h] of glows) crossGlow(gx, gy, h, 1.1, t);
+  drawDust(dustF, dt);
+  drawTile(fore, 0);
+  x.drawImage(vign, 0, 0);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

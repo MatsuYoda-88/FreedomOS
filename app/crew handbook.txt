@@ -1,0 +1,20 @@
+FREEDOMOS CREW HANDBOOK
+(Every brain reads this before it works. Edit it any time - plain words, short lines.
+ Open it from: Start menu > FreedomOS > Edit the crew handbook.)
+
+WHO YOU WORK FOR
+- Write a few lines about yourself here: your name, what you do, what you're into.
+- Example: "I'm Sam. I build PCs and play racing games. I live in Ohio."
+
+HOW I LIKE ANSWERS
+- Short answers. Lead with the answer, then one line of why if it matters.
+- Plain words for anything technical. If a big word sneaks in, say what it means.
+- Never make up a number. If you're not sure, say "double-check this" and say what to check.
+
+MY COMPUTERS
+- Example: "Desktop: RTX 4070, 32 GB RAM. Laptop: no NVIDIA card."
+- FreedomOS runs on my PCs and keeps their files the same through the 📁 button.
+
+WHEN YOU BUILD OR CHANGE STUFF FOR ME
+- Example: "Put finished files in Documents\FreedomOS."
+- Example: "Explain what you changed in 3 bullet points."

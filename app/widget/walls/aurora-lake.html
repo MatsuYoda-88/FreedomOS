@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Aurora Lake</title>
+<style>html,body{margin:0;height:100%;background:#010308;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d');
+let W, H, dpr, shore, stars = [], peaks = [], shooters = [], pines = [];
+const r = (a, b) => a + Math.random() * (b - a);
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = c.width = innerWidth * dpr; H = c.height = innerHeight * dpr;
+  shore = H * 0.66;
+  stars = Array.from({ length: 420 }, () => ({ x: r(0, W), y: r(0, shore), s: r(0.4, 1.8) * dpr, p: r(0, 9), sp: r(0.5, 2) }));
+  peaks = [];
+  for (let layer = 0; layer < 2; layer++) {
+    const pts = []; let px = 0;
+    while (px <= W + 100 * dpr) { const base = layer ? 0.1 : 0.2, wob = Math.sin(px / W * Math.PI * 3 + layer * 2) * 0.06;
+    pts.push([px, shore - Math.max(0.02, base + wob + r(-0.05, 0.05)) * H]); px += r(25, 90) * dpr; }
+    peaks.push(pts);
+  }
+  pines = Array.from({ length: Math.floor(W / (14 * dpr)) }, (_, i) => ({ x: i * 14 * dpr + r(-5, 5) * dpr, h: r(14, 46) * dpr }));
+}
+addEventListener('resize', resize); resize();
+
+function sky(t) {
+  const g = x.createLinearGradient(0, 0, 0, shore);
+  g.addColorStop(0, '#010308'); g.addColorStop(0.7, '#061229'); g.addColorStop(1, '#0c1d3a');
+  x.fillStyle = g; x.fillRect(0, 0, W, shore);
+  for (const s of stars) {
+    x.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(t * 0.001 * s.sp + s.p));
+    x.fillStyle = '#e8f4ff'; x.fillRect(s.x, s.y, s.s, s.s);
+  }
+  x.globalAlpha = 1;
+}
+
+const aur = document.createElement('canvas'), ax = aur.getContext('2d');
+aur.width = 220; aur.height = 180;
+function aurora(t) {
+  // draw small, stretch big: silky smooth curtains and cheap on the GPU
+  const AW = aur.width, AH = aur.height;
+  ax.clearRect(0, 0, AW, AH);
+  ax.globalCompositeOperation = 'lighter';
+  const bands = [
+    { y: 0.20, amp: 0.10, col: [0, 255, 170], speed: 0.00022, h: 0.45 },
+    { y: 0.32, amp: 0.07, col: [140, 80, 255], speed: 0.00031, h: 0.35 },
+    { y: 0.12, amp: 0.08, col: [255, 60, 200], speed: 0.00017, h: 0.28 },
+  ];
+  for (const b of bands) {
+    const [R, G, B] = b.col;
+    for (let px = 0; px < AW; px++) {
+      const u = px / AW;
+      const wave = Math.sin(u * 6 + t * b.speed * 3) * 0.6 + Math.sin(u * 13 - t * b.speed * 5) * 0.3 + Math.sin(u * 27 + t * b.speed * 9) * 0.1;
+      const y0 = (b.y + wave * b.amp) * AH;
+      const k = 0.3 + 0.7 * Math.pow(Math.abs(Math.sin(u * 4 + t * b.speed * 4)), 2);
+      const rays = 0.75 + 0.25 * Math.sin(u * 140 + t * 0.0015);
+      const g = ax.createLinearGradient(0, y0, 0, y0 + b.h * AH);
+      g.addColorStop(0, `rgba(${R},${G},${B},0)`);
+      g.addColorStop(0.12, `rgba(${R},${G},${B},${0.4 * k * rays})`);
+      g.addColorStop(1, `rgba(${R},${G},${B},0)`);
+      ax.fillStyle = g; ax.fillRect(px, y0, 1, b.h * AH);
+    }
+  }
+  x.save(); x.globalCompositeOperation = 'lighter'; x.imageSmoothingQuality = 'high';
+  x.drawImage(aur, 0, 0, W, shore);
+  x.restore();
+}
+
+function shootingStars(dt) {
+  if (Math.random() < 0.006) shooters.push({ x: r(0, W), y: r(0, shore * 0.5), vx: r(-1, 1) > 0 ? 1 : -1, life: 1 });
+  x.save(); x.lineCap = 'round';
+  for (const s of shooters) {
+    const len = 140 * dpr, sp = dt * 1.1 * dpr;
+    s.x += s.vx * sp; s.y += sp * 0.45; s.life -= dt * 0.0012;
+    const g = x.createLinearGradient(s.x, s.y, s.x - s.vx * len, s.y - len * 0.45);
+    g.addColorStop(0, `rgba(255,255,255,${s.life})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.strokeStyle = g; x.lineWidth = 2 * dpr;
+    x.beginPath(); x.moveTo(s.x, s.y); x.lineTo(s.x - s.vx * len, s.y - len * 0.45); x.stroke();
+  }
+  x.restore();
+  shooters = shooters.filter(s => s.life > 0);
+}
+
+function land() {
+  ['#060a16', '#03050c'].forEach((col, i) => {
+    const pts = peaks[i];
+    x.fillStyle = col; x.beginPath(); x.moveTo(0, shore);
+    for (const [px, py] of pts) x.lineTo(px, py);
+    x.lineTo(W, shore); x.closePath(); x.fill();
+  });
+  x.fillStyle = '#010205';
+  for (const p of pines) {
+    x.beginPath(); x.moveTo(p.x, shore - p.h); x.lineTo(p.x - p.h * 0.22, shore); x.lineTo(p.x + p.h * 0.22, shore); x.closePath(); x.fill();
+  }
+}
+
+function lake(t) {
+  // mirror the whole scene into the lake, then wobble it in thin slices
+  const lakeH = H - shore;
+  x.fillStyle = '#01030a'; x.fillRect(0, shore, W, lakeH);
+  const slice = 3 * dpr;
+  x.save(); x.globalAlpha = 0.55;
+  for (let y = 0; y < lakeH; y += slice) {
+    const srcY = shore - y - slice;
+    if (srcY < 0) break;
+    const wob = Math.sin(y * 0.05 / dpr + t * 0.002) * (2 + y / lakeH * 10) * dpr;
+    x.drawImage(c, 0, srcY, W, slice, wob, shore + y, W, slice);
+  }
+  x.restore();
+  x.save(); x.globalCompositeOperation = 'lighter'; x.globalAlpha = 0.35;
+  x.translate(0, H); x.scale(1, -1);
+  x.drawImage(aur, 0, 0, aur.width, aur.height * 0.6, Math.sin(t * 0.001) * 6 * dpr, 0, W, H - shore);
+  x.restore();
+  const fade = x.createLinearGradient(0, shore, 0, H);
+  fade.addColorStop(0, 'rgba(1,3,10,0)'); fade.addColorStop(1, 'rgba(1,3,10,0.85)');
+  x.fillStyle = fade; x.fillRect(0, shore, W, lakeH);
+}
+
+let last = 0;
+function frame(t) {
+  const dt = Math.min(100, t - (last || t)); last = t;
+  sky(t); aurora(t); shootingStars(dt); land(); lake(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

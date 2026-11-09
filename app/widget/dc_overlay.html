@@ -1,0 +1,128 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>F35 overlay</title>
+<style>
+  html,body{margin:0;height:100%;background:#12161f;color:#e6ebf5;font:14px/1.4 'Segoe UI',system-ui,sans-serif;overflow:hidden;user-select:none}
+  #w{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:8px 10px}
+  #hd{display:flex;align-items:center;gap:6px;cursor:move;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid #2a3245;flex:none}
+  #hd b{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+  .ic{cursor:pointer;opacity:.6;padding:1px 5px;border-radius:6px} .ic:hover{opacity:1} .ic.on{opacity:1;background:#5865f2}
+  #op{width:70px;accent-color:#5865f2}
+  body.locked #hd{display:none} body.locked #w{padding:6px 8px}
+  #body{flex:1;overflow:auto;scrollbar-width:none;min-height:0}
+  /* 🎙 voice */
+  .u{display:flex;align-items:center;gap:8px;margin:3px 0} .u img,.u .ph{width:30px;height:30px;border-radius:50%;flex:none;background:#2a3245;object-fit:cover;transition:box-shadow .12s}
+  .u.talk img,.u.talk .ph{box-shadow:0 0 0 2px #3ba55d,0 0 12px #3ba55d} .u span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .u.talk span{color:#fff;font-weight:600}
+  .vh{font-size:12px;opacity:.7;margin-bottom:4px;display:flex;align-items:center;gap:6px} .dot{width:8px;height:8px;border-radius:50%;background:#3ba55d;box-shadow:0 0 6px #3ba55d}
+  /* 💬 chat */
+  .m{background:#171d29;border-radius:7px;padding:5px 8px;margin:4px 0;font-size:13px;word-wrap:break-word} .m b{color:#9fb4ff}
+  #say{display:flex;gap:6px;margin-top:6px;flex:none} #say input{flex:1;min-width:0;background:#1b2130;color:#e6ebf5;border:1px solid #2a3245;border-radius:8px;padding:6px 8px;font:13px 'Segoe UI'}
+  #say button{background:#5865f2;color:#fff;border:0;border-radius:8px;padding:0 10px;cursor:pointer} body.locked #say{display:none}
+  /* 🔔 notifications */
+  .t{background:#1b2130;border-left:3px solid #5865f2;border-radius:8px;padding:7px 9px;margin:5px 0;font-size:13px;animation:in .25s ease;transition:opacity .6s}
+  .t.ping{border-left-color:#ed4245} .t.join{border-left-color:#3ba55d} .t.leave{border-left-color:#888} .t b{color:#9fb4ff} .t.bye{opacity:0}
+  @keyframes in{from{transform:translateX(12px);opacity:0}}
+  /* the action bar */
+  #bar{display:none;align-items:center;gap:6px;padding:8px 10px;cursor:move;width:max-content;box-sizing:border-box}
+  #bar button{background:#1b2130;color:#e6ebf5;border:1px solid #2a3245;border-radius:10px;padding:6px 10px;font-size:16px;cursor:pointer;min-width:40px}
+  #bar button:hover{background:#242c3f} #bar button.on{background:#ed4245;border-color:#ed4245} #bar button.wd{font-size:14px} #bar button.wd.off{opacity:.4}
+  #bar .sep{width:1px;height:28px;background:#2a3245;margin:0 4px} #bar .lock{background:#5865f2;border-color:#5865f2}
+  #bar .tip{font-size:11px;opacity:.6;white-space:nowrap;margin:0 2px}
+  .empty{opacity:.55;font-size:13px;margin:6px 0}
+</style></head>
+<body>
+<div id="w">
+  <div id="hd"><b id="ttl"></b><input type="range" id="op" min="20" max="100" title="How see-through it is when locked"><span class="ic" id="only" title="Only show who's talking (when locked)" style="display:none">🗣</span><span class="ic" id="pin" title="Pin it - stays up when the overlay's locked">📌</span><span class="ic" id="hide" title="Hide this widget">✕</span></div>
+  <div id="body"></div>
+  <div id="say" style="display:none"><input id="sayIn" placeholder="Message the channel…"><button id="sayGo">➤</button></div>
+</div>
+<div id="bar">
+  <button id="bMute" title="Mute">🎤</button><button id="bDeaf" title="Deafen">🎧</button><button id="bLeave" title="Leave voice">📞</button><button id="bShare" title="Share the WiMix song in chat">🎵</button>
+  <span class="sep"></span>
+  <button class="wd" data-w="voice" title="Voice widget">🎙</button><button class="wd" data-w="chat" title="Chat widget">💬</button><button class="wd" data-w="notes" title="Notifications widget">🔔</button>
+  <span class="sep"></span>
+  <button id="bFull" title="Open the whole Discord">⛶</button><button id="bDc" title="Discord tab">👾</button>
+  <span class="tip">Shift+` to lock</span>
+  <button class="lock" id="bLock" title="Lock - widgets stay put, clicks go through (Shift+`)">🔒</button>
+</div>
+<script>
+const W = new URLSearchParams(location.search).get("w") || "voice";
+const $ = id => document.getElementById(id), esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const post = m => { try { chrome.webview.postMessage(m); } catch (e) {} };
+let unlocked = false, empty = null, onlyTalk = false;
+try { onlyTalk = localStorage.getItem("dc_onlytalk") === "1"; } catch (e) {}
+const TTL = { voice: "🎙 Voice", chat: "💬 Chat", notes: "🔔 Notifications" };
+window.setMode = (u, pin, op, on) => {
+  unlocked = u; document.body.classList.toggle("locked", !u);
+  $("pin").classList.toggle("on", !!pin); $("op").value = op;
+  document.querySelectorAll("#bar .wd").forEach(b => b.classList.toggle("off", !(on || {})[b.dataset.w]));
+  draw();
+};
+const ctl = (d, extra) => fetch("/discord/ctl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ do: d }, extra || {})) }).then(() => draw()).catch(() => {});
+const setEmpty = e => { if (e !== empty) { empty = e; post("w:empty:" + (e ? 1 : 0)); } };
+
+if (W === "bar") {
+  $("w").style.display = "none"; $("bar").style.display = "flex";
+  $("bar").addEventListener("mousedown", e => { if (e.target === $("bar") || e.target.classList.contains("tip")) post("w:drag"); });
+  $("bMute").onclick = () => ctl("mute"); $("bDeaf").onclick = () => ctl("deaf"); $("bLeave").onclick = () => ctl("leave"); $("bShare").onclick = () => ctl("share");
+  $("bFull").onclick = () => post("w:full"); $("bDc").onclick = () => post("w:discord"); $("bLock").onclick = () => post("w:lock");
+  document.querySelectorAll("#bar .wd").forEach(b => b.onclick = () => post("w:toggle:" + b.dataset.w));
+  const fit = () => { const r = $("bar").getBoundingClientRect(); post("w:size:" + Math.ceil(r.width) + ":" + Math.ceil(r.height)); };   // window fits the bar
+  setTimeout(fit, 50); setTimeout(fit, 600); addEventListener("resize", () => setTimeout(fit, 50));
+} else {
+  $("ttl").textContent = TTL[W] || W;
+  $("hd").addEventListener("mousedown", e => { if (e.target.id === "hd" || e.target.id === "ttl") post("w:drag"); });
+  $("pin").onclick = () => post("w:pin"); $("hide").onclick = () => post("w:hide");
+  $("op").oninput = e => post("w:op:" + e.target.value);
+  if (W === "voice") { $("only").style.display = ""; $("only").classList.toggle("on", onlyTalk);
+    $("only").onclick = () => { onlyTalk = !onlyTalk; try { localStorage.setItem("dc_onlytalk", onlyTalk ? "1" : "0"); } catch (e) {} $("only").classList.toggle("on", onlyTalk); draw(); }; }
+  if (W === "chat") { $("say").style.display = "";
+    const send = () => { const t = $("sayIn").value.trim(); if (!t) return; $("sayIn").value = ""; ctl("share", { text: t }); };
+    $("sayGo").onclick = send; $("sayIn").addEventListener("keydown", e => { if (e.key === "Enter") send(); }); }
+}
+
+let seenMsgs = null, seenUsers = null, pings = -1;
+function toast(cls, html, ms, click){
+  const d = document.createElement("div"); d.className = "t " + cls; d.innerHTML = html; if (click) { d.style.cursor = "pointer"; d.onclick = click; }
+  $("body").prepend(d); while ($("body").children.length > 5) $("body").lastChild.remove();
+  setTimeout(() => d.classList.add("bye"), ms); setTimeout(() => { d.remove(); if (!$("body").children.length) setEmpty(true); }, ms + 700);
+  setEmpty(false);
+}
+async function draw(){
+  if (W === "bar") {
+    try { const s = await (await fetch("/discord/state")).json();
+      $("bMute").classList.toggle("on", !!s.mute); $("bMute").textContent = s.mute ? "🔇" : "🎤";
+      $("bDeaf").classList.toggle("on", !!s.deaf); $("bLeave").style.display = s.connected ? "" : "none"; } catch (e) {}
+    return;
+  }
+  let s; try { s = await (await fetch("/discord/state")).json(); } catch (e) { return; }
+  if (W === "voice") {
+    let us = s.users || [];
+    if (!unlocked && onlyTalk) us = us.filter(u => u.talk);
+    const nothing = !s.connected && !(s.users || []).length;
+    $("body").innerHTML = (s.connected ? `<div class="vh"><span class="dot"></span>${esc(s.voice || "Voice")}</div>` : "")
+      + (us.length ? us.map(u => `<div class="u ${u.talk ? "talk" : ""}">${u.av ? `<img src="${esc(u.av)}" alt="">` : `<div class="ph"></div>`}<span>${esc(u.name)}</span></div>`).join("")
+                   : `<div class="empty">${!s.open ? "Discord isn't open yet." : s.connected ? "Nobody's talking." : "Not in voice."}</div>`);
+    setEmpty(nothing || (!unlocked && onlyTalk && !us.length));
+  }
+  if (W === "chat") {
+    const ms = s.msgs || [];
+    $("ttl").textContent = "💬 " + (s.channel || "Chat");
+    $("body").innerHTML = ms.length ? ms.map(m => `<div class="m"><b>${esc(m.who || "…")}</b> ${esc(m.text)}</div>`).join("") : `<div class="empty">Open a channel in Discord to see its chat here.</div>`;
+    $("body").scrollTop = 1e9;
+    setEmpty(!ms.length);
+  }
+  if (W === "notes") {
+    const ms = s.msgs || [], names = (s.users || []).map(u => u.name);
+    if (seenMsgs) ms.filter(m => !seenMsgs.has(m.id)).forEach(m => toast("", `<b>${esc(m.who || "…")}</b> ${esc(m.text)}`, 7000));
+    if (seenUsers) { names.filter(n => !seenUsers.has(n)).forEach(n => toast("join", `🟢 <b>${esc(n)}</b> joined voice`, 5000));
+                     [...seenUsers].filter(n => !names.includes(n)).forEach(n => toast("leave", `⚪ <b>${esc(n)}</b> left voice`, 4000)); }
+    seenMsgs = new Set(ms.map(m => m.id)); seenUsers = new Set(names);
+    try { const p = await (await fetch("/discord/ping")).json();
+      if (pings >= 0 && p.n > pings) toast("ping", `🔔 <b>${p.n} new ping${p.n > 1 ? "s" : ""}</b> - tap to open`, 9000, () => post("w:full"));
+      pings = p.n; } catch (e) {}
+    if (unlocked && !$("body").children.length) $("body").innerHTML = `<div class="empty">New messages, pings and voice joins pop up here.</div>`;
+    if (!unlocked) { const e = $("body").querySelector(".empty"); if (e) e.remove(); if (!$("body").querySelector(".t")) setEmpty(true); }
+  }
+}
+draw(); setInterval(draw, W === "voice" ? 500 : 1000);
+</script></body></html>

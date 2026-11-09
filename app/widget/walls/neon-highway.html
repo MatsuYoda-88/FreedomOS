@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Neon Highway</title>
+<style>html,body{margin:0;height:100%;background:#05010d;overflow:hidden}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c'), x = c.getContext('2d');
+let W, H, S, dpr, horizon, stars = [], ridges = [], lights = [];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function ridge(seed, rough, base, amp) {
+  const pts = []; let y = 0, v = 0;
+  for (let i = 0; i <= 200; i++) {
+    v += (Math.sin(i * rough + seed) + Math.sin(i * rough * 2.7 + seed * 3)) * 0.5;
+    v *= 0.92;
+    pts.push(base - Math.abs(Math.sin(i * 0.05 + seed)) * amp - v * amp * 0.08);
+  }
+  return pts;
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = c.width = innerWidth * dpr; H = c.height = innerHeight * dpr;
+  // S = scene scale: screen height on wide screens, capped on tall/portrait ones so nothing turns spiky
+  S = Math.min(H, W * 1.15);
+  horizon = H * 0.58;
+  stars = Array.from({ length: 260 }, () => ({ x: Math.random() * W, y: Math.random() * horizon * 0.9, r: rand(0.4, 1.6) * dpr, p: Math.random() * 6 }));
+  ridges = [
+    { pts: ridge(1.3, 0.21, horizon, S * 0.22), col: '#1a0633', glow: '#ff2fd0', speed: 0.004 },
+    { pts: ridge(4.1, 0.33, horizon, S * 0.13), col: '#0d0320', glow: '#00f0ff', speed: 0.009 },
+  ];
+}
+addEventListener('resize', resize); resize();
+
+function drawSky(t) {
+  const g = x.createLinearGradient(0, 0, 0, horizon);
+  g.addColorStop(0, '#05010d'); g.addColorStop(0.55, '#1b0436'); g.addColorStop(1, '#4a0a4f');
+  x.fillStyle = g; x.fillRect(0, 0, W, horizon);
+  for (const s of stars) {
+    x.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(t * 0.0012 + s.p));
+    x.fillStyle = '#fff'; x.fillRect(s.x, s.y, s.r, s.r);
+  }
+  x.globalAlpha = 1;
+}
+
+function drawSun(t) {
+  const r = S * 0.2, cx = W / 2, cy = horizon - r * 0.35;
+  x.save();
+  x.shadowColor = '#ff3fa8'; x.shadowBlur = 80 * dpr;
+  const g = x.createLinearGradient(0, cy - r, 0, cy + r);
+  g.addColorStop(0, '#ffe36e'); g.addColorStop(0.5, '#ff6a3d'); g.addColorStop(1, '#ff1f8e');
+  x.fillStyle = g;
+  x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+  x.restore();
+  // scrolling cut stripes
+  x.fillStyle = '#2a0640';
+  const off = (t * 0.02) % 1;
+  for (let i = 0; i < 9; i++) {
+    const k = (i + off) / 9, yy = cy + r * k * 0.95, h = (2 + k * 14) * dpr;
+    x.fillRect(cx - r, yy, r * 2, h);
+  }
+}
+
+function drawRidges(t) {
+  for (const rg of ridges) {
+    const n = rg.pts.length, shift = (t * rg.speed) % n, step = Math.max(W, H * 1.4) / (n - 20);
+    x.beginPath(); x.moveTo(0, horizon);
+    const last = Math.min(n - 19, Math.ceil(W / step) + 1);
+    for (let i = 0; i < last; i++) x.lineTo(i * step, rg.pts[Math.floor(i + shift) % n]);
+    x.lineTo(W, horizon); x.closePath();
+    x.fillStyle = rg.col; x.fill();
+    x.save(); x.strokeStyle = rg.glow; x.lineWidth = 1.5 * dpr; x.shadowColor = rg.glow; x.shadowBlur = 12 * dpr;
+    x.beginPath();
+    for (let i = 0; i < last; i++) { const y = rg.pts[Math.floor(i + shift) % n]; i ? x.lineTo(i * step, y) : x.moveTo(0, y); }
+    x.stroke(); x.restore();
+  }
+}
+
+function drawGround(t) {
+  const g = x.createLinearGradient(0, horizon, 0, H);
+  g.addColorStop(0, '#12002a'); g.addColorStop(1, '#030008');
+  x.fillStyle = g; x.fillRect(0, horizon, W, H - horizon);
+
+  x.save();
+  x.shadowColor = '#ff2fd0'; x.shadowBlur = 10 * dpr;
+  x.strokeStyle = 'rgba(255,47,208,0.85)'; x.lineWidth = 1.4 * dpr;
+  // horizontal lines rushing at you
+  const speed = (t * 0.0009) % 1;
+  for (let i = 0; i < 28; i++) {
+    const z = (i + speed) / 28, y = horizon + Math.pow(z, 2.6) * (H - horizon);
+    x.globalAlpha = Math.min(1, z * 2.2);
+    x.beginPath(); x.moveTo(0, y); x.lineTo(W, y); x.stroke();
+  }
+  x.globalAlpha = 1;
+  // vertical lines converging on the vanishing point
+  for (let i = -24; i <= 24; i++) {
+    x.beginPath(); x.moveTo(W / 2 + i * W * 0.004, horizon); x.lineTo(W / 2 + i * W * 0.09, H); x.stroke();
+  }
+  x.restore();
+
+  // road + center dashes
+  x.fillStyle = 'rgba(0,0,0,0.55)';
+  x.beginPath(); x.moveTo(W / 2 - W * 0.006, horizon); x.lineTo(W / 2 + W * 0.006, horizon);
+  x.lineTo(W / 2 + W * 0.22, H); x.lineTo(W / 2 - W * 0.22, H); x.closePath(); x.fill();
+  x.save(); x.shadowColor = '#00f0ff'; x.shadowBlur = 14 * dpr; x.fillStyle = '#7ffcff';
+  const d = (t * 0.0016) % 1;
+  for (let i = 0; i < 14; i++) {
+    const z0 = (i + d) / 14, z1 = (i + d + 0.45) / 14;
+    const y0 = horizon + Math.pow(z0, 2.6) * (H - horizon), y1 = horizon + Math.pow(Math.min(z1, 1), 2.6) * (H - horizon);
+    const w0 = (0.5 + z0 * 6) * dpr, w1 = (0.5 + z1 * 6) * dpr;
+    x.beginPath(); x.moveTo(W / 2 - w0, y0); x.lineTo(W / 2 + w0, y0); x.lineTo(W / 2 + w1, y1); x.lineTo(W / 2 - w1, y1); x.fill();
+  }
+  x.restore();
+}
+
+function drawLights(t, dt) {
+  if (Math.random() < 0.02) lights.push({ z: 0, side: Math.random() < 0.5 ? -1 : 1, col: Math.random() < 0.5 ? '#ff2a4a' : '#ffd36a' });
+  x.save(); x.globalCompositeOperation = 'lighter';
+  for (const l of lights) {
+    l.z += dt * 0.00035 * (0.5 + l.z * 3);
+    const y = horizon + Math.pow(l.z, 2.6) * (H - horizon), off = l.z * W * 0.12 * l.side, s = (1 + l.z * 18) * dpr;
+    x.shadowColor = l.col; x.shadowBlur = s * 4; x.fillStyle = l.col;
+    x.beginPath(); x.arc(W / 2 + off - s * 1.4, y, s, 0, 7); x.arc(W / 2 + off + s * 1.4, y, s, 0, 7); x.fill();
+  }
+  x.restore();
+  lights = lights.filter(l => l.z < 1.05);
+}
+
+let last = 0;
+function frame(t) {
+  const dt = Math.min(100, t - (last || t)); last = t;
+  drawSky(t); drawSun(t); drawRidges(t); drawGround(t); drawLights(t, dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HereticPixel v1.0</title>
+<style>
+  :root {
+    --bg: #14110d; --panel: #1f1a14; --edge: #3b3226; --stone: #4a4236;
+    --text: #e6dcc6; --dim: #9c8f78; --green: #7fa34a; --green2: #a4c860;
+    --blood: #b8402e; --gold: #d9a441;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Consolas", "Courier New", monospace; font-size: 15px;
+    background-image: repeating-linear-gradient(0deg, transparent 0 31px, #ffffff06 31px 32px),
+                      repeating-linear-gradient(90deg, transparent 0 63px, #ffffff06 63px 64px);
+  }
+  header { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 3px solid var(--edge); background: #0f0c09; }
+  h1 { margin: 0; font-size: 26px; letter-spacing: 3px; color: var(--green2); text-shadow: 3px 3px 0 #000, 0 0 12px #7fa34a55; }
+  h1 span { color: var(--blood); }
+  #status { margin-left: auto; font-size: 13px; color: var(--dim); text-align: right; }
+  #status b { color: var(--gold); }
+  main { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; gap: 18px; padding: 18px 20px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 3px solid var(--edge); box-shadow: 4px 4px 0 #000; padding: 14px; }
+  label { display: block; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin: 10px 0 4px; }
+  textarea, input, select {
+    width: 100%; background: #0f0c09; color: var(--text); border: 2px solid var(--stone);
+    font: inherit; padding: 8px; outline: none;
+  }
+  textarea:focus, input:focus, select:focus { border-color: var(--green); }
+  textarea { height: 96px; resize: vertical; }
+  .row { display: flex; gap: 10px; } .row > div { flex: 1; }
+  button {
+    font: inherit; cursor: pointer; border: 3px solid #000; padding: 10px 14px;
+    background: var(--stone); color: var(--text); box-shadow: 3px 3px 0 #000;
+  }
+  button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
+  #go { width: 100%; margin-top: 14px; font-size: 20px; letter-spacing: 2px; background: var(--green); color: #10140a; font-weight: bold; }
+  #go:disabled { background: var(--stone); color: var(--dim); cursor: wait; }
+  details { margin-top: 12px; border-top: 2px dashed var(--edge); padding-top: 8px; }
+  summary { cursor: pointer; color: var(--gold); }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  #msg { min-height: 22px; margin-top: 10px; color: var(--gold); }
+  #msg.err { color: var(--blood); }
+  #stage { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 420px; }
+  #stage img { max-width: 100%; max-height: 70vh; image-rendering: pixelated; border: 3px solid #000; box-shadow: 6px 6px 0 #000; }
+  #stage .empty { color: var(--dim); text-align: center; line-height: 1.8; }
+  .tools { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+  .tools a, .tools button { font-size: 13px; padding: 6px 10px; text-decoration: none; color: var(--text); background: var(--stone); border: 2px solid #000; }
+  #meta { font-size: 12px; color: var(--dim); margin-top: 8px; text-align: center; max-width: 700px; }
+  h2 { font-size: 15px; color: var(--green2); letter-spacing: 2px; margin: 0 0 10px; }
+  #gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  #gallery figure { margin: 0; cursor: pointer; }
+  #gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; image-rendering: pixelated; border: 2px solid #000; background: #000; }
+  #gallery figcaption { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .full { grid-column: 1 / -1; }
+  #kill { background: var(--blood); color: #fff; font-size: 12px; padding: 6px 10px; display: none; }
+  .dropbox { position: relative; }
+  .dropbox.over textarea, .drop.over { border-color: var(--gold); background: #2a2216; }
+  .dropbox.over::after { content: "DROP IT"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 24px; letter-spacing: 3px; color: var(--gold); pointer-events: none; text-shadow: 2px 2px 0 #000; }
+  .clip { position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; font-size: 16px; box-shadow: 2px 2px 0 #000; border-width: 2px; }
+  .chip { display: none; align-items: center; gap: 10px; margin-top: 8px; padding: 6px; border: 2px solid var(--stone); background: #0f0c09; }
+  .chip img { width: 56px; height: 56px; object-fit: contain; image-rendering: pixelated; background: #000; }
+  .chip .x { margin-left: auto; padding: 2px 8px; font-size: 13px; box-shadow: none; }
+  .modes { display: flex; gap: 6px; } .modes button { flex: 1; font-size: 13px; padding: 7px 4px; }
+  .modes button.on { background: var(--gold); color: #1a1408; }
+  #picbits { display: none; }
+  .engines { display: flex; gap: 6px; margin-bottom: 4px; } .engines button { flex: 1; font-size: 13px; padding: 8px 4px; line-height: 1.3; }
+  .engines button.on { background: var(--green); color: #10140a; font-weight: bold; }
+  .engines small { display: block; font-size: 10px; opacity: .8; font-weight: normal; }
+  .drop { border: 2px dashed var(--stone); padding: 14px; text-align: center; color: var(--dim); cursor: pointer; margin-top: 6px; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .thumbs img { width: 48px; height: 48px; object-fit: contain; image-rendering: pixelated; background: #000; border: 2px solid #000; }
+  .pack { display: flex; gap: 10px; align-items: center; margin-top: 10px; padding: 6px; background: #0f0c09; border: 2px solid var(--edge); }
+  .pack img { width: 64px; height: 64px; object-fit: cover; image-rendering: pixelated; }
+  .pack .sw { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px; } .pack .sw i { width: 10px; height: 10px; display: block; }
+  .pack button { margin-left: auto; font-size: 12px; padding: 4px 8px; box-shadow: none; }
+  #mystyle { margin-top: 14px; }
+  .spin { display: inline-block; animation: s 1s steps(4) infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>HERETIC<span>PIXEL</span></h1>
+  <div id="status">connecting...</div>
+  <button id="kill" title="Stops HereticPixel and frees your GPU">Shut down</button>
+</header>
+<main>
+  <section class="panel">
+    <label>Engine</label>
+    <div class="engines">
+      <button data-e="klein" class="on">KLEIN<small>FLUX.2 · your style</small></button>
+      <button data-e="zimage">Z-IMAGE<small>Turbo · sharp &amp; wild</small></button>
+    </div>
+    <label for="prompt">What are we making? <span style="text-transform:none">(or drop a picture in here)</span></label>
+    <div class="dropbox" id="dropbox">
+      <textarea id="prompt" placeholder="a gargoyle with glowing green eyes perched on a crumbling tower&#10;&#10;...or drag a picture onto this box / paste with Ctrl+V"></textarea>
+      <button class="clip" id="clip" title="Add a picture">📎</button>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+    <div class="chip" id="chip"><img id="chipimg" alt=""><span id="chipname" class="hint"></span><button class="x" id="unpic">✕</button></div>
+    <div id="picbits">
+      <label>What to do with the picture</label>
+      <div class="modes">
+        <button id="m-remake" class="on" title="Redraw your picture in this engine's style">AI remake</button>
+        <button id="m-snap" title="Instant, no AI">Just pixelate</button>
+      </div>
+      <div class="hint" style="margin-top:6px">Picture jobs stay clothed - a checker tosses anything nude.</div>
+      <div id="changebox">
+        <label for="change">How much the AI can change it <span id="changev"></span></label>
+        <input id="change" type="range" min="0.2" max="0.95" step="0.05" value="0.6">
+        <div class="hint">Low = looks just like your pic. High = AI goes wild. Text above is optional extra instructions.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="style">Look</label>
+        <select id="style">
+          <optgroup label="Looks" id="lookgroup"></optgroup>
+          <optgroup label="Your styles" id="mygroup"></optgroup>
+          <option value="__new">➕ Teach it a new style...</option>
+        </select>
+      </div>
+      <div>
+        <label for="size">Shape</label>
+        <select id="size">
+          <option value="square">Square</option>
+          <option value="wide">Wide</option>
+          <option value="tall">Tall</option>
+          <option value="ultrawide">Ultrawide</option>
+        </select>
+      </div>
+    </div>
+    <label for="who">Your name (so your friends know who made it)</label>
+    <input id="who" maxlength="24" placeholder="Your name">
+    <button id="go">MAKE IT</button>
+    <div id="msg"></div>
+
+    <details>
+      <summary>Knobs for the gearheads</summary>
+      <div id="pixelknobs">
+      <label for="chunk">Pixel chunkiness <span id="chunkv"></span></label>
+      <input id="chunk" type="range" min="4" max="24" step="2" value="8">
+      <div class="hint">Bigger = chunkier, more old-school. 8 is the sweet spot.</div>
+      <label for="colors">Colours <span id="colorsv"></span></label>
+      <input id="colors" type="range" min="0" max="64" step="4" value="32">
+      <div class="hint">Fewer colours = more 1994. 0 = don't cut colours.</div>
+      <div id="styleknobs" style="display:none">
+        <label for="ss">How strong your style <span id="ssv"></span></label>
+        <input id="ss" type="range" min="0.2" max="1.4" step="0.1" value="0.8">
+        <label style="text-transform:none" id="palrow"><input type="checkbox" id="pal" checked style="width:auto"> Use ONLY my colours (pixel styles)</label>
+      </div>
+      <label for="ps">Pixel-art strength <span id="psv"></span></label>
+      <input id="ps" type="range" min="0.4" max="1.8" step="0.1" value="1.2">
+      </div>
+      <div class="row">
+        <div><label for="steps">Steps (blank = best)</label><input id="steps" type="number" min="4" max="60" placeholder="8"></div>
+        <div><label for="seed">Seed (blank = random)</label><input id="seed" placeholder="random"></div>
+      </div>
+      <label for="neg">Don't want</label>
+      <input id="neg" placeholder="e.g. people, text">
+    </details>
+
+    <details id="mystyle">
+      <summary>🎨 My Style - teach it how YOU draw</summary>
+      <div class="hint">Drop 1-8 of your own pieces (a sheet of characters is fine - it splits them up) and <b>SAVE MY STYLE</b>.
+        <b>Right away:</b> pick it under Your styles and KLEIN copies straight off your drawings.
+        <b>Better:</b> hit <b>TRAIN IT</b> - the GPU studies how you draw for an hour or two, then every picture comes out looking like yours.
+        More pieces = better. Same style = pieces that look alike.</div>
+      <label for="msname">Style name</label>
+      <input id="msname" maxlength="40" placeholder="My style">
+      <label for="mswords">Describe it (optional)</label>
+      <input id="mswords" maxlength="200" placeholder="chunky black outlines, dark moody shading">
+      <div class="drop" id="msdrop">Drop your pieces here or click to pick</div>
+      <input type="file" id="msfile" accept="image/*" multiple hidden>
+      <div class="thumbs" id="msthumbs"></div>
+      <button id="mssave" style="width:100%;margin-top:10px">SAVE MY STYLE</button>
+      <div id="mslist"></div>
+    </details>
+  </section>
+
+  <section class="panel" id="stage">
+    <div class="empty">Type something gross and fantasy-looking<br>and hit <b>MAKE IT</b>.<br><br>Ideas: fire imp · floating skull wizard · chalice of power · mummy in bandages<br><br>Or drag any picture onto the text box to pixel-ify it.</div>
+  </section>
+
+  <section class="panel full">
+    <h2>THE CREW'S STASH</h2>
+    <div id="gallery"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+};
+$("who").value = store.get("hp_who", "");
+$("who").addEventListener("change", () => store.set("hp_who", $("who").value));
+for (const [id, out, fmt] of [["chunk","chunkv",v=>v+"px"],["colors","colorsv",v=>v==0?"no limit":v],["ps","psv",v=>v],
+                              ["change","changev",v=>Math.round(v*100)+"%"],["ss","ssv",v=>v]]) {
+  const f = () => $(out).textContent = "(" + fmt($(id).value) + ")";
+  $(id).addEventListener("input", f); f();
+}
+
+let busy = false, isHost = false, picture = null, picMode = "remake", msPics = [];
+let engines = null, engine = store.get("hp_engine", "klein");
+function setEngine(e) {
+  if (!engines || !engines[e]) return;
+  engine = e; store.set("hp_engine", e);
+  document.querySelectorAll(".engines button").forEach(b => b.classList.toggle("on", b.dataset.e === e));
+  const cur = $("style").value;
+  $("lookgroup").innerHTML = engines[e].looks.map(([k, n]) => `<option value="${k}">${esc(n)}</option>`).join("");
+  if (cur.startsWith("my:") && [...$("style").options].some(o => o.value === cur)) $("style").value = cur;
+  else $("style").value = engines[e].looks[0][0];
+  const px = engines[e].snap;
+  $("pixelknobs").style.display = px ? "block" : "none";
+  $("palrow").style.display = px ? "block" : "none";
+  $("m-snap").style.display = px ? "block" : "none";
+  if (!px && picMode === "snap") setMode("remake");
+  $("steps").placeholder = engines[e].steps;
+  styleChanged();
+}
+document.querySelectorAll(".engines button").forEach(b => b.onclick = () => setEngine(b.dataset.e));
+
+// ---- pictures: shrink in the browser so it zips over Tailscale
+function readPic(file, maxSide = 1536) {
+  return new Promise((ok, bad) => {
+    if (!file || !file.type.startsWith("image/")) return bad(new Error("That's not a picture. "));
+    const fr = new FileReader();
+    fr.onerror = () => bad(new Error("Couldn't read that file."));
+    fr.onload = () => {
+      const im = new Image();
+      im.onerror = () => bad(new Error("Couldn't open that picture."));
+      im.onload = () => {
+        const s = Math.min(1, maxSide / Math.max(im.width, im.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+        const g = c.getContext("2d"); g.imageSmoothingEnabled = s < 1;
+        g.drawImage(im, 0, 0, c.width, c.height);
+        ok({ data: c.toDataURL("image/png"), name: file.name || "pasted picture", w: im.width, h: im.height });
+      };
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function attach(file) {
+  try {
+    picture = await readPic(file);
+    $("chipimg").src = picture.data; $("chipname").textContent = `${picture.name} (${picture.w}×${picture.h})`;
+    $("chip").style.display = "flex"; $("picbits").style.display = "block"; say("");
+  } catch (e) { say(e.message, true); }
+}
+function unattach() { picture = null; $("chip").style.display = "none"; $("picbits").style.display = "none"; $("file").value = ""; }
+function setMode(m) {
+  picMode = m;
+  for (const k of ["remake", "snap"]) $("m-" + k).classList.toggle("on", m === k);
+  $("changebox").style.display = m === "remake" ? "block" : "none";
+}
+function dropZone(el, onFiles) {
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("over"); });
+  el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("over"); });
+  el.addEventListener("drop", e => {
+    e.preventDefault(); el.classList.remove("over");
+    const files = [...e.dataTransfer.files].filter(f => f.type.startsWith("image/"));
+    if (files.length) onFiles(files); else say("Drop a picture file (PNG, JPG...).", true);
+  });
+}
+dropZone($("dropbox"), files => attach(files[0]));
+$("clip").onclick = () => $("file").click();
+$("file").onchange = () => $("file").files[0] && attach($("file").files[0]);
+$("unpic").onclick = unattach;
+$("m-remake").onclick = () => setMode("remake");
+$("m-snap").onclick = () => setMode("snap");
+document.addEventListener("paste", e => {
+  const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith("image/"));
+  if (f) { e.preventDefault(); if (document.activeElement && document.activeElement.closest && document.activeElement.closest("#mystyle")) addMsPics([f]); else attach(f); }
+});
+// ---- my style
+async function addMsPics(files) {
+  for (const f of files) {
+    if (msPics.length >= 8) { say("8 pieces max. ", true); break; }
+    try { msPics.push(await readPic(f, 1024)); } catch (e) { say(e.message, true); }
+  }
+  $("msthumbs").innerHTML = msPics.map((p, i) => `<img src="${p.data}" title="click to remove" data-i="${i}">`).join("");
+  $("msthumbs").querySelectorAll("img").forEach(im => im.onclick = () => { msPics.splice(+im.dataset.i, 1); addMsPics([]); });
+}
+dropZone($("msdrop"), addMsPics);
+$("msdrop").onclick = () => $("msfile").click();
+$("msfile").onchange = () => { addMsPics([...$("msfile").files]); $("msfile").value = ""; };
+$("mssave").onclick = async () => {
+  const name = $("msname").value.trim();
+  if (!name) return say("Give your style a name. ", true);
+  if (!msPics.length) return say("Drop at least one of your pieces in the My Style box.", true);
+  $("mssave").disabled = true; say("Learning your style...");
+  try {
+    const r = await fetch("api/mystyle", { method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name, words: $("mswords").value, who: $("who").value, pictures: msPics.map(p => p.data) }) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error);
+    msPics = []; addMsPics([]); $("msname").value = ""; $("mswords").value = "";
+    await loadPacks(); $("style").value = "my:" + j.id; styleChanged();
+    say(`Saved "${j.name}" - ${j.colors.length} colours. It's picked in Look now. Make something!`);
+  } catch (e) { say(e.message, true); }
+  $("mssave").disabled = false;
+};
+async function loadPacks() {
+  try {
+    const packs = await (await fetch("api/mystyles")).json();
+    const cur = $("style").value;
+    $("mygroup").innerHTML = packs.map(p => `<option value="my:${p.id}">${esc(p.name)}</option>`).join("");
+    if ([...$("style").options].some(o => o.value === cur)) $("style").value = cur;
+    $("mslist").innerHTML = packs.map(p => `<div class="pack"><img src="mystyle/${p.id}/collage.png" alt="">
+      <div style="flex:1"><b>${esc(p.name)}</b><div class="hint">${p.count} piece${p.count > 1 ? "s" : ""}${p.who ? " · by " + esc(p.who) : ""}
+        · ${p.trained ? `<span style="color:#7fd17f">trained ✓ ${esc(p.trained_when || "")}</span>` : p.old_training ? `<span style="color:#e0a040">trained for the old shop - hit TRAIN IT again</span>` : `<span style="color:#e0a040">not trained yet (KLEIN still copies it)</span>`}</div>
+      <div class="sw">${p.colors.map(c => `<i style="background:${c}"></i>`).join("")}</div>
+      <div class="trainbox" id="tb-${p.id}"></div></div>
+      ${isHost ? `<div style="display:flex;flex-direction:column;gap:6px"><button class="train" data-id="${p.id}">${p.trained ? "Re-train" : "TRAIN IT"}</button>
+                  <button class="toss" data-id="${p.id}">Toss it</button></div>` : ""}</div>`).join("");
+    $("mslist").querySelectorAll("button.toss").forEach(b => b.onclick = async () => {
+      const r = await fetch("api/mystyle/" + b.dataset.id, { method: "DELETE" }); const j = await r.json().catch(() => ({}));
+      if (!r.ok) say(j.error || "Couldn't toss it.", true); loadPacks(); styleChanged();
+    });
+    $("mslist").querySelectorAll("button.train").forEach(b => b.onclick = async () => {
+      if (!confirm("Train this style? The GPU is busy for an hour or two (first time also downloads klein) - pictures wait till it's done.")) return;
+      const r = await fetch("api/mystyle/" + b.dataset.id + "/train", { method: "POST" }); const j = await r.json().catch(() => ({}));
+      if (!r.ok) return say(j.error || "Couldn't start training.", true);
+      say("Training started - watch the bar under your style."); watchTraining();
+    });
+    watchTraining();
+  } catch {}
+}
+let trainTimer = null;
+async function watchTraining() {
+  clearTimeout(trainTimer);
+  let t = {};
+  try { t = await (await fetch("api/train")).json(); } catch {}
+  document.querySelectorAll(".trainbox").forEach(el => el.innerHTML = "");
+  if (!t.pack) return;
+  const box = $("tb-" + t.pack);
+  const pct = t.total ? Math.round(100 * t.step / t.total) : 0;
+  if (box && (t.running || ["done", "failed", "stopped"].includes(t.state) && Date.now() / 1000 - t.when < 600)) {
+    box.innerHTML = `<div class="hint" style="margin-top:6px">${esc(t.note || "")}</div>
+      ${t.running ? `<div style="height:8px;background:#2a2620;border-radius:4px;margin-top:4px"><div style="height:8px;width:${pct}%;background:#d9a441;border-radius:4px"></div></div>
+      <div style="display:flex;gap:4px;margin-top:6px">${[0,1,2,3].map(i => `<img src="mystyle/${t.pack}/train_peek${i}.png?${t.when|0}" style="width:48px;height:48px;image-rendering:pixelated;border-radius:3px" onerror="this.remove()">`).join("")}</div>
+      ${isHost ? `<button id="tstop" style="margin-top:6px">Stop training</button>` : ""}` : ""}`;
+    const st = $("tstop"); if (st) st.onclick = async () => { await fetch("api/train/stop", { method: "POST" }); say("Stopping - takes a few seconds."); };
+  }
+  if (t.running) trainTimer = setTimeout(watchTraining, 3000);
+  else if (t.state === "done" && !watchTraining.reloaded) { watchTraining.reloaded = true; loadPacks(); }
+}
+function styleChanged() {
+  if ($("style").value === "__new") { $("style").value = ($("lookgroup").querySelector("option") || {}).value || ""; $("mystyle").open = true; $("msname").focus(); }
+  $("styleknobs").style.display = $("style").value.startsWith("my:") ? "block" : "none";
+}
+$("style").addEventListener("change", styleChanged);
+
+async function refreshStatus() {
+  try {
+    const s = await (await fetch("api/status")).json();
+    isHost = s.host;
+    $("kill").style.display = s.host && !s.in_f35 ? "inline-block" : "none";
+    const tr = s.training && s.training.running ? s.training : null;
+    const word = tr ? `learning your style ${tr.total ? Math.round(100 * tr.step / tr.total) + "%" : "..."} 🎓`
+                    : {asleep:"asleep 💤", loading:"waking up...", ready:"ready", error:"busted", training:"learning a style 🎓"}[s.state] || s.state;
+    if (tr && !trainTimer) watchTraining();
+    if (s.host && !$("mslist").dataset.hostDone) { $("mslist").dataset.hostDone = 1; loadPacks(); }
+    if (!engines) { engines = s.engines; setEngine(engines[engine] ? engine : "klein"); }
+    const ld = s.loaded && s.engines[s.loaded] ? " · " + s.loaded + " engine" : "";
+    $("status").innerHTML = `v${s.version} · brain <b>${word}</b>${ld}${s.waiting ? ` · ${s.waiting} in line` : ""}${s.fake ? " · TEST MODE" : ""}`;
+  } catch { $("status").textContent = "can't reach the rig"; }
+}
+
+function show(r) {
+  $("stage").innerHTML = `
+    <img src="img/${r.name}.png" alt="" style="image-rendering:${(r.snap || r.engine === "pixel" || r.engine === "snap") ? "pixelated" : "auto"}">
+    <div class="tools">
+      ${(r.snap || r.engine === "pixel" || r.engine === "snap") ? `<a href="img/${r.name}.png?dl=1">Download big</a>
+      <a href="img/${r.name}_small.png?dl=1">Download true size (${r.w}×${r.h})</a>` : `<a href="img/${r.name}.png?dl=1">Download (${r.w}×${r.h})</a>`}
+      <button id="again">Same seed again</button>
+    </div>
+    <div id="meta">${esc(r.prompt)}${r.seen ? `<br>👁 the looker saw: <i>${esc(r.seen)}</i>` : ""}<br>${esc(r.style)}${r.engine ? " · " + r.engine : ""}${r.mode && r.mode !== "text" ? " · " + ({snap: "pixelated", remake: "AI remake", face: "same face", vibe: "same vibe"}[r.mode] || r.mode) : ""} · seed ${r.seed} · ${r.secs}s${r.who ? " · by " + esc(r.who) : ""}</div>`;
+  $("again").onclick = () => { $("seed").value = r.seed; if (r.mode !== "snap") $("prompt").value = r.prompt; if (r.engine) setEngine(r.engine); };
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function say(t, err) { $("msg").textContent = t; $("msg").className = err ? "err" : ""; }
+
+async function make() {
+  if (busy) return;
+  const prompt = $("prompt").value.trim();
+  if (!prompt && !picture) return say("Type something or drop a picture first. ", true);
+  busy = true; $("go").disabled = true; $("go").textContent = "COOKIN'...";
+  say("Sending it to the rig...");
+  try {
+    const r = await fetch("api/make", { method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ prompt, engine, style: $("style").value, size: $("size").value, who: $("who").value,
+        chunk: +$("chunk").value, colors: +$("colors").value, pixel_strength: +$("ps").value,
+        steps: $("steps").value ? +$("steps").value : null, seed: $("seed").value.trim(), negative: $("neg").value,
+        picture: picture ? picture.data : null, mode: picMode, change: +$("change").value,
+        style_strength: +$("ss").value, use_palette: $("pal").checked }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Something broke.");
+    let workSecs = 0;
+    if (j.done) { say(""); show(j.done); loadGallery(); }
+    else while (true) {
+      await new Promise(res => setTimeout(res, 1000));
+      const s = await (await fetch("api/job/" + j.id)).json();
+      if (s.status === "queued") say(`In line... ${s.ahead} ahead of you.`);
+      else if (s.status === "loading") say(s.note);
+      else if (s.status === "looking") say("👁 The looker's checking out your picture...");
+      else if (s.status === "working") {
+        workSecs++;
+        if (s.note && s.note !== "Ready to rip.") say(s.note);
+        else if (workSecs > 150) say("This one's taking way too long. If it's stuck, close the shop in FreedomOS and tell Claude.", true);
+        else say("Cooking the pixels...");
+      }
+      else if (s.status === "done") { say(""); show(s.result); loadGallery(); break; }
+      else if (s.status === "error") throw new Error(s.error);
+      else throw new Error("Job got lost. Try again.");
+    }
+  } catch (e) { say(e.message, true); }
+  busy = false; $("go").disabled = false; $("go").textContent = "MAKE IT"; refreshStatus();
+}
+
+async function loadGallery() {
+  try {
+    const items = await (await fetch("api/recent")).json();
+    $("gallery").innerHTML = items.length ? items.map((r, i) =>
+      `<figure data-i="${i}"><img loading="lazy" src="img/${r.name}_small.png" alt="" style="image-rendering:${(r.snap || r.engine === "pixel" || r.engine === "snap") ? "pixelated" : "auto"}"><figcaption>${esc(r.who || "?")}: ${esc(r.prompt)}</figcaption></figure>`).join("")
+      : `<div class="hint">Nothing in the stash yet.</div>`;
+    $("gallery").querySelectorAll("figure").forEach(f => f.onclick = () => { show(items[+f.dataset.i]); scrollTo({top: 0, behavior: "smooth"}); });
+  } catch {}
+}
+
+$("go").onclick = make;
+$("prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) make(); });
+$("kill").onclick = async () => {
+  if (!isHost) return;
+  await fetch("shutdown", { method: "POST" }).catch(() => {});
+  document.body.innerHTML = "<h1 style='padding:40px;color:#a4c860;font-family:monospace'>HereticPixel's shut down. GPU's free. Double-click the .bat to fire it back up.</h1>";
+};
+refreshStatus(); loadGallery(); loadPacks();
+setInterval(refreshStatus, 5000);
+setInterval(() => { if (!busy) loadGallery(); }, 15000);
+</script>
+</body>
+</html>

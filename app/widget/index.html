@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121722">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>FreedomOS</title>
+<style>
+  :root{
+    --glass: rgba(16,20,28,.78); --glass2: rgba(255,255,255,.07); --edge: rgba(255,255,255,.13);
+    --txt:#e9edf3; --dim:#9aa4b2; --go:#5fd38d; --warn:#f2b84b; --bad:#ff6b6b; --acc:#7cc4ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0e14;color:var(--txt);font:13px/1.35 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  #app{height:100%;position:relative}
+  #scene{position:absolute;inset:0;overflow:hidden}
+  canvas{width:100%;height:100%;display:block}
+  .glass{background:var(--glass);border:1px solid var(--edge);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    box-shadow:0 6px 24px rgba(0,0,0,.4)}
+  button{background:linear-gradient(180deg,#3d8bfd,#2a6bd1);color:#fff;border:0;border-radius:8px;padding:5px 11px;font:600 12.5px "Segoe UI";cursor:pointer}
+  button:hover{filter:brightness(1.12)} button:disabled{opacity:.45;cursor:default;filter:none}
+  button.red{background:linear-gradient(180deg,#d9534f,#a83532)} button.grn{background:linear-gradient(180deg,#5fae4a,#3f7f31)}
+  textarea,input{width:100%;background:rgba(0,0,0,.35);color:var(--txt);border:1px solid var(--edge);border-radius:8px;
+    padding:6px 8px;font:inherit;resize:none;outline:none}
+  textarea:focus,input:focus{border-color:var(--acc)}
+  .sub{color:var(--dim);font-size:12px}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .bar{height:5px;border-radius:4px;background:var(--glass2);overflow:hidden;margin:2px 0 5px}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),#a98bff);transition:width .5s}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 7px var(--bad);flex:none}
+  .dot.on{background:var(--go);box-shadow:0 0 7px var(--go)}
+
+  /* ---------- 🔧 the little ask box (top right) ---------- */
+  #ask{position:absolute;top:10px;right:10px;z-index:6;width:min(560px,calc(100vw - 20px));border-radius:14px;padding:8px;
+    transition:width .25s,opacity .25s;opacity:.94;max-height:calc(100vh - 20px);overflow-y:auto;overflow-x:hidden}
+  #ask .q{display:flex;gap:6px;align-items:center}
+  #ask input{border-radius:10px;padding:7px 10px;font-size:14px}
+  #askGo{padding:7px 12px;border-radius:10px}
+  #ask.mini{width:auto;max-width:min(320px,calc(100vw - 20px));opacity:.6;cursor:pointer}
+  #ask.mini .q,#ask.mini #ansBox,#ask.mini #recent{display:none!important}
+  #askPill{display:none;font-size:14px;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ask.mini #askPill{display:block}
+  #ansBox{display:none;padding:7px 4px 2px}
+  #ans{font:800 30px/1.15 "Segoe UI",system-ui,sans-serif;word-break:break-word;overflow-wrap:anywhere}
+  #ans.long{font-size:21px} #ans.xlong{font-size:16px;font-weight:700}
+  #ans.wait{font-size:15px;font-weight:600;color:var(--dim)}
+  #ansExtra{font-size:14.5px;line-height:1.4;margin-top:5px;color:#dfe6ef;overflow-wrap:anywhere}
+  #ansMeta{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;overflow-wrap:anywhere}
+  .sure{font-size:11px;padding:1px 8px;border-radius:9px;font-weight:700}
+  .sure.high{background:#1f5f3a;color:#bff5d3} .sure.check{background:#6b4e12;color:#ffe3a6}
+  #ansMeta a{color:var(--acc);text-decoration:none}
+  #crew{margin-top:6px;font-size:12px} #crew:empty{display:none}
+  #crew .cv{display:flex;gap:6px;align-items:baseline;padding:2px 0;border-top:1px solid var(--edge)}
+  #crew .cv b{min-width:58px} #crew .cv .v{font-weight:700} #crew .cv .v.ok{color:#7dff9a} #crew .cv .v.no{color:#ffb86b}
+  #crew .cv .s{color:var(--dim);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  #crew .verdict{margin-top:4px;font-weight:700} .crewBtn{font-size:11px;padding:1px 8px;background:var(--glass2);border:1px solid var(--edge)}
+  #recent{display:none;gap:5px;flex-wrap:wrap;margin-top:6px}
+  #ask.open #recent{display:flex}
+  #recent span{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--glass2);border:1px solid var(--edge);cursor:pointer;
+    max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---------- the slim strip along the bottom (auto-hides to a glance line) ---------- */
+  #dock{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:6;max-width:calc((100vw - 16px) / 1.25);
+    display:flex;flex-direction:column-reverse;align-items:center;gap:6px;zoom:1.25}   /* the menu bar: top, 25% bigger */
+  @media (min-width:761px) and (max-width:1800px){   /* not much room - slide left so it never sits under the ask box */
+    #dock{left:10px;transform:none;align-items:flex-start;max-width:calc((100vw - 610px) / 1.25)} }
+  #strip{display:flex;align-items:center;gap:6px 10px;border-radius:20px;padding:4px 6px 4px 12px;white-space:nowrap;flex-wrap:wrap;
+    max-width:100%;transition:opacity .3s,padding .3s}
+  #strip .info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;font-size:12px}
+  #dock:not(.tuck) #strip .info{min-width:max-content}
+  #strip .info span{overflow:hidden;text-overflow:ellipsis}
+  #strip .btns{display:flex;gap:4px;flex:0 1 auto;flex-wrap:wrap;transition:max-width .3s,opacity .3s;max-width:1600px;overflow:hidden;padding:1px}
+  #strip .btns button{background:var(--glass2);border:1px solid var(--edge);border-radius:14px;padding:3px 9px;font-size:13px;font-weight:600}
+  #strip .btns button.on{background:#2a6bd1;border-color:#2a6bd1}
+  #dock.tuck #strip{opacity:.45;padding:2px 10px;flex-wrap:nowrap} #dock.tuck #strip .btns{max-width:0;opacity:0;flex-wrap:nowrap}
+  #dock.tuck .pop{display:none!important}
+  .pop{display:none;border-radius:14px;padding:10px 12px;width:min(440px,calc(100vw - 16px));max-height:min(60vh,420px);overflow:auto}
+  .pop.show{display:block}
+  .pop b.t{display:block;margin-bottom:6px}
+  #brainPick button,#brainRemote button{background:var(--glass2);border:1px solid var(--edge);font-weight:600}
+  #brainPick button.on,#brainRemote button.on{background:#1f5f3a;border-color:#2f8f57}
+  #jobs{display:flex;flex-direction:column;gap:6px}
+  .job{background:var(--glass2);border:1px solid var(--edge);border-radius:10px;padding:6px 8px;cursor:pointer}
+  .job:hover{border-color:var(--acc)}
+  .chip{font-size:10.5px;padding:1px 7px;border-radius:9px;background:#333;text-transform:uppercase;letter-spacing:.4px}
+  .chip.done{background:#1f5f3a}.chip.failed{background:#6a2424}.chip.working,.chip.merging,.chip.planning,.chip.queued{background:#5c4a17}
+
+  body.hid #ask, body.hid #dock{display:none}
+
+  #shop{position:fixed;inset:0;z-index:8;display:none;flex-direction:column;background:rgba(0,0,0,.6);padding:12px}
+  #shop .bar2{display:flex;align-items:center;gap:10px;padding:4px 4px 8px} #shop .bar2 b{font-size:15px}
+  #shop iframe{flex:1;border:1px solid var(--edge);border-radius:12px;background:#14110d;width:100%}
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:5px;margin-top:5px;max-height:230px;overflow:auto}
+  .gal img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:zoom-in;image-rendering:pixelated;border:1px solid var(--edge)}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;max-height:150px;overflow:auto}
+  .chips button{font-size:11px;padding:3px 8px;background:var(--glass2);border:1px solid var(--edge)}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:9}
+  #modal .card{width:min(820px,92vw);max-height:86vh;overflow:auto;border-radius:14px;padding:12px}
+  pre{white-space:pre-wrap;word-wrap:break-word;font:12.5px/1.45 Consolas,monospace;background:rgba(0,0,0,.3);padding:10px;border-radius:9px}
+  #bye{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:22px;background:rgba(0,0,0,.6);text-align:center;z-index:7}
+
+  /* ---------- phone: everything stacks, nothing hides ---------- */
+  @media (max-width: 760px){
+    html,body{overflow:auto;height:auto}
+    #app{height:auto;display:flex;flex-direction:column;gap:8px;padding:8px;padding-top:max(8px,env(safe-area-inset-top))}
+    #ask{position:static;width:100%;opacity:1;order:-1} #ask.mini{width:100%;opacity:1}
+    #ask.mini .q{display:flex!important} #ask.mini #ansBox{display:block!important} #ask.mini #recent{display:flex!important} #ask.mini #askPill{display:none}
+    #ask input{font-size:16px} #ans{font-size:36px} #recent{display:flex}
+    #scene{position:relative;height:62vw;min-height:240px;border-radius:14px}
+    #dock{position:static;transform:none;max-width:none;align-items:stretch;zoom:1;flex-direction:column}
+    #dock.tuck #strip{opacity:1;padding:6px 8px 6px 12px;flex-wrap:wrap} #dock.tuck #strip .btns{max-width:none;opacity:1;flex-wrap:wrap}
+    #dock.tuck .pop.show{display:block!important}
+    #strip{flex-wrap:wrap;white-space:normal;border-radius:14px}
+    .pop{width:100%;max-height:none}
+    textarea,input,button{font-size:16px}
+    body.hid #ask, body.hid #dock{display:flex}
+  }
+  /* ---------- crew board hidden = compact app over the wallpaper (same stacked layout as the phone) ---------- */
+  body.compact{overflow:auto;background:#0d1220}
+  body.compact #app{height:auto;display:flex;flex-direction:column;gap:8px;padding:8px;max-width:560px;margin:0 auto}
+  body.compact #scene{display:none}
+  body.compact #napNote{display:flex}
+  body.compact #ask{position:static;width:100%;opacity:1;order:-1} body.compact #ask.mini{width:100%;opacity:1}
+  body.compact #ask.mini .q{display:flex!important} body.compact #ask.mini #ansBox{display:block!important} body.compact #ask.mini #recent{display:flex!important} body.compact #ask.mini #askPill{display:none}
+  body.compact #dock{position:static;transform:none;max-width:none;align-items:stretch;zoom:1;flex-direction:column}
+  body.compact #dock.tuck #strip{opacity:1;padding:6px 8px 6px 12px;flex-wrap:wrap} body.compact #dock.tuck #strip .btns{max-width:none;opacity:1;flex-wrap:wrap}
+  body.compact #dock.tuck .pop.show{display:block!important}
+  body.compact #strip{flex-wrap:wrap;white-space:normal;border-radius:14px}
+  body.compact .pop{width:100%;max-height:none}
+  body.compact #dock{display:flex} body.compact #ask{display:block}
+  body.compact #dock{order:-2} body.compact #strip{order:-1} body.compact #ask{order:-1} body.compact #napNote{order:2}
+  body.compact #ask,body.compact #ask.mini{width:100%!important;max-width:none!important;align-self:stretch;box-sizing:border-box} body.compact #ask .q{display:flex!important;width:100%} body.compact #ask .q input{flex:1;min-width:0;font-size:15px;padding:9px 12px} body.compact #recent{display:flex!important;margin-top:8px}
+  #strip .btns button.gone{display:none!important}
+  body:not(.native) #dcOvlBtn{display:none}
+  .subtabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap} .subtabs button{padding:4px 10px;font-size:13px;background:#1b2130;color:#8ea3c4;border:1px solid #2a3245} .subtabs button.on{background:#4b8fe8;color:#fff;border-color:#4b8fe8}
+  .ct{display:none} .ct.on{display:block}
+  #popChats{width:min(560px,calc(100vw - 16px))}
+  #ctShop #ask{position:static!important;width:100%!important;max-width:none!important;opacity:1!important;transform:none!important;box-shadow:none;background:none;border:0;padding:0;display:block!important}
+  #ctShop #ask #askPill{display:none!important} #ctShop #ask .q{display:flex!important} #ctShop #ask #ansBox{display:block!important} #ctShop #ask #recent{display:flex!important;margin-top:6px}
+  .ctList{max-height:240px;overflow:auto;margin-top:6px} .ctList .it{padding:6px 8px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:8px} .ctList .it:hover{background:#1b2130}
+  #brainBtn.off{filter:grayscale(1);opacity:.55}
+  /* 🎧 WiMix: see-through panel, lyrics, now-playing card, karaoke */
+  /* every panel + window is see-through: your wallpaper shows behind all of them */
+  .pop.glass{background:rgba(12,16,26,.30)!important;backdrop-filter:blur(10px) saturate(1.2);-webkit-backdrop-filter:blur(10px) saturate(1.2)}
+  #ccWin .card,#webWin .card,#fsWin .card{background:rgba(12,16,26,.42)!important;backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2)}
+  #ccWin,#webWin,#fsWin{background:rgba(0,0,0,.22)!important}
+  .lyr{max-height:170px;overflow:auto;margin-top:8px;font-size:14px;line-height:1.5;scroll-behavior:smooth;mask-image:linear-gradient(transparent,#000 18%,#000 82%,transparent)}
+  #popMusic,#popMusic .lyr{scrollbar-width:none} #popMusic::-webkit-scrollbar,#popMusic .lyr::-webkit-scrollbar{display:none}
+  .mIco{padding:2px 7px;font-size:13px;line-height:1.2;background:rgba(255,255,255,.08);border:0;border-radius:8px;opacity:.6} .mIco:hover{opacity:1}
+  .lyr:empty{display:none} .lyr div{opacity:.45;transition:opacity .25s,transform .25s} .lyr div.on{opacity:1;font-weight:700;color:#9fc6ff}
+  #npCard{position:fixed;right:14px;bottom:14px;z-index:7;display:none;align-items:center;gap:10px;padding:8px 12px 8px 8px;border-radius:14px;
+    background:rgba(12,16,26,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(120,150,200,.18);color:#e6ebf5;max-width:min(420px,calc(100vw - 28px));transition:opacity .4s}
+  #npCard.show{display:flex} #npCard img{width:52px;height:52px;border-radius:9px;object-fit:cover;flex:none}
+  #npCard .tt{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} #npCard .ar{font-size:12px;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #npCard .ln{font-size:12px;color:#9fc6ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:15px}
+  #npCard button{padding:4px 8px;font-size:14px;background:rgba(255,255,255,.08);border:0} #npCard .tx{min-width:0;flex:1}
+  #karaoke{position:fixed;left:50%;bottom:16vh;transform:translateX(-50%);z-index:6;text-align:center;pointer-events:none;display:none;width:min(1100px,90vw);
+    text-shadow:0 2px 14px rgba(0,0,0,.85),0 0 2px #000;color:#fff}
+  #karaoke.show{display:block} #karaoke .p,#karaoke .n{font-size:clamp(14px,1.8vw,24px);opacity:.45} #karaoke .c{font-size:clamp(24px,3.4vw,52px);font-weight:800;margin:6px 0;color:#cfe3ff}
+  /* 🖼 live wallpaper behind everything */
+  #wallBg{display:none;position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:0;pointer-events:none;background:#000}
+  body.walls #wallBg{display:block} body.walls{background:#000} #app{position:relative;z-index:1}
+  #wallPick{background:#171d29;color:#cfe3ff;border:1px solid #2a3245;border-radius:8px;padding:4px 6px;font-size:12px}
+  /* 🧭 inside the FreedomOS app the toolbar lives under the tabs (like bookmarks) - the page just shows the pop-ups */
+  body.native #strip{display:none!important}
+  body.native #dock{top:calc(var(--hudH, 0px) + 4px);left:8px;transform:none;max-width:min(460px,calc(100vw - 16px))}
+  body.native.compact #app{padding-top:calc(var(--hudH, 0px) + 8px)}
+  body.native #napNote, body.native #app > #ask{display:none!important}     /* in the app: the 🖼 button + 💬 Chats do these */
+  html body #ask:not(:focus-within):not(._) #recent{display:none!important}               /* past searches only show while you're typing */
+  #popWalls select{width:100%;font-size:14px;padding:6px}
+  body.native #dock.tuck .pop.show{display:block!important}
+  #napNote{display:none;align-items:center;gap:10px;justify-content:space-between;border-radius:14px;padding:8px 12px;color:#cfe3ff;font-size:13px}
+  /* ---------- 💬 chat with Claude ---------- */
+  #ccWin{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10}
+  #ccWin.open{display:flex}
+  #ccWin .card{width:min(1000px,96vw);height:min(88vh,860px);display:flex;flex-direction:column;border-radius:14px;padding:10px;gap:8px}
+  #ccWin .top{display:flex;align-items:center;gap:8px}
+  #ccWin .top b{font-size:15px} #ccWin .top .sp{flex:1}
+  #ccBody{flex:1;display:flex;gap:10px;min-height:0}
+  #ccList{width:240px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:4px}
+  #ccList .it{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:9px;background:var(--glass2);border:1px solid transparent;cursor:pointer;font-size:13px}
+  #ccList .it.on{border-color:#d9a032;background:rgba(217,160,50,.14)}
+  #ccList .it .tt{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  #ccList .it button{padding:0 4px;background:none;border:none;font-size:14px;opacity:.45} #ccList .it button.pinned{opacity:1}
+  #ccList .lbl{font-size:11px;opacity:.6;margin:6px 2px 0}
+  #ccMain{flex:1;display:flex;flex-direction:column;min-width:0}
+  #ccMsgs{flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px}
+  #ccMsgs .m{max-width:86%;padding:9px 12px;border-radius:12px;line-height:1.45;font-size:14px;white-space:pre-wrap;word-wrap:break-word}
+  #ccMsgs .you{align-self:flex-end;background:#2b5d8f}
+  #ccMsgs .claude{align-self:flex-start;background:var(--glass2);border:1px solid var(--edge)}
+  #ccMsgs .claude.err{border-color:#c4573b}
+  #ccMsgs .m img{max-width:100%;max-height:260px;border-radius:8px;display:block;margin-bottom:6px;cursor:zoom-in}
+  #ccMsgs .tools{font-size:11px;opacity:.65;margin-top:6px;white-space:normal}
+  #ccMsgs pre{background:rgba(0,0,0,.35);padding:8px;border-radius:8px;overflow:auto;white-space:pre;font-size:12px}
+  #ccMsgs code{background:rgba(0,0,0,.3);padding:0 4px;border-radius:4px}
+  #ccMsgs .hello{opacity:.75;text-align:center;margin:auto;max-width:420px;font-size:14px}
+  #ccIn{display:flex;gap:6px;align-items:flex-end;margin-top:6px}
+  #ccIn textarea{flex:1;resize:none;min-height:42px;max-height:160px;border-radius:10px;padding:10px;font:inherit;background:var(--glass2);color:inherit;border:1px solid var(--edge)}
+  #ccIn button{height:42px}
+  #ccPrev{display:none;align-items:center;gap:8px;margin-top:6px;font-size:12px} #ccPrev img{height:56px;border-radius:6px}
+  #ccCam{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:12}
+  #ccCam video{max-width:94vw;max-height:72vh;border-radius:10px;background:#000}
+  #ccCam .row{gap:8px}
+  #ccZoom{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:13} #ccZoom img{max-width:96vw;max-height:94vh}
+  @media (max-width:700px){ #ccList{display:none} #ccWin.list #ccList{display:flex;width:100%} #ccWin.list #ccMain{display:none}
+    #ccWin .card{width:100vw;height:100dvh;border-radius:0} #ccMsgs .m{max-width:94%}
+    #ccLogin,#ccNote{display:none} #ccWin .top b{font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;flex:1} #ccWin .top .sp{display:none}
+    #ccNew{font-size:0;padding:6px 10px} #ccNew::after{content:"＋";font-size:16px} }
+  @media (min-width:701px){ #ccListBtn{display:none} }
+  /* ---------- the top bar runs the WHOLE width of the top (nothing gets chopped off) ---------- */
+  @media (min-width:761px){
+    #dock{left:8px;right:8px;transform:none;max-width:none;align-items:stretch}
+    #dock .pop{align-self:flex-start}
+    #strip{width:100%;box-sizing:border-box;border-radius:14px}
+    #strip .info{flex:1}
+    #strip .btns{max-width:1600px}
+    #ask{top:56px}
+  }
+  #liteDrop{margin:4px 0 6px;padding:8px;border:2px dashed var(--edge);border-radius:10px;font-size:12px;cursor:pointer;text-align:center}
+  #liteDrop.over{border-color:#e0a92e;background:rgba(224,169,46,.12)}
+  #liteRefs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+  #liteRefs div{position:relative} #liteRefs img{width:58px;height:58px;object-fit:cover;border-radius:6px;display:block}
+  #liteRefs button{position:absolute;top:-6px;right:-6px;padding:0 5px;font-size:11px;border-radius:50%}
+  /* ---------- 📁 files across the laptop, desktop and phone ---------- */
+  /* ---------- 🔎 F35 Web: search + clean reader ---------- */
+  #webWin{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10}
+  #webWin.open{display:flex}
+  #webWin .card{width:min(1000px,96vw);height:min(90vh,900px);display:flex;flex-direction:column;border-radius:14px;padding:10px;gap:8px}
+  #webTop{display:flex;gap:6px;align-items:center} #webQ{flex:1;font-size:15px;padding:9px 12px;border-radius:10px}
+  #webBody{flex:1;overflow:auto;padding:4px 6px}
+  #webAns{background:var(--glass2);border:1px solid #4b8fe8;border-radius:12px;padding:10px 12px;margin-bottom:10px;line-height:1.5;display:none}
+  #webAns .src{color:#7fb2ff;cursor:pointer;font-weight:700}
+  .wr{padding:9px 6px;border-bottom:1px solid var(--edge)} .wr .tt{color:#9cc4ff;font-weight:600;cursor:pointer} .wr .st{font-size:12px;opacity:.6}
+  .wr .sn{font-size:13px;opacity:.85;margin:3px 0} .wr .bt button{padding:2px 8px;font-size:12px;margin-right:4px}
+  #webRead{line-height:1.6;font-size:15px;max-width:760px;margin:0 auto} #webRead img{max-width:100%;height:auto;border-radius:8px}
+  #webRead table{border-collapse:collapse;margin:8px 0} #webRead td,#webRead th{border:1px solid var(--edge);padding:4px 8px}
+  #webRead a{color:#7fb2ff} #webRead pre{white-space:pre-wrap}
+  @media (max-width:700px){ #webWin .card{width:100vw;height:100dvh;border-radius:0} }
+  #fsWin{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10}
+  #fsWin.open{display:flex}
+  #fsWin .card{width:min(1000px,96vw);height:min(88vh,860px);display:flex;flex-direction:column;border-radius:14px;padding:10px;gap:8px}
+  #fsWin .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap} #fsWin .top .sp{flex:1}
+  #fsSync{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:var(--glass2);font-size:13px}
+  #fsSync .bar{flex:1;min-width:120px;margin:0}
+  #fsTabs{display:flex;gap:6px;flex-wrap:wrap} #fsTabs button{background:var(--glass2);border:1px solid var(--edge)} #fsTabs button.on{background:linear-gradient(180deg,#e0a92e,#b07d12)}
+  #fsCrumbs{font-size:13px;opacity:.85;display:flex;gap:4px;flex-wrap:wrap;align-items:center} #fsCrumbs a{cursor:pointer;color:#ffd27a;text-decoration:none}
+  #fsTools{display:flex;gap:6px;flex-wrap:wrap}
+  #fsRows{flex:1;overflow:auto;border-radius:10px}
+  #fsRows .r{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px;cursor:pointer}
+  #fsRows .r:hover{background:rgba(255,255,255,.05)}
+  #fsRows .r .nm{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  #fsRows .r .sz{width:80px;text-align:right;opacity:.6;font-size:12px} #fsRows .r .dt{width:120px;text-align:right;opacity:.6;font-size:12px}
+  #fsRows .r button{padding:2px 7px;background:none;border:none;font-size:15px;opacity:.6} #fsRows .r button:hover{opacity:1}
+  #fsRows .r .ns{font-size:10px;opacity:.55;border:1px solid var(--edge);border-radius:6px;padding:0 4px}
+  #fsRows .thumb{width:34px;height:34px;object-fit:cover;border-radius:5px;flex:none}
+  #fsPair{display:none;flex-direction:column;gap:8px;padding:10px;border-radius:10px;background:var(--glass2);font-size:13px}
+  #fsPair textarea{width:100%;min-height:54px;border-radius:8px;padding:8px;font:12px monospace;background:rgba(0,0,0,.3);color:inherit;border:1px solid var(--edge)}
+  #fsPrev table{border-collapse:collapse;width:100%;font-size:13px} #fsPrev td,#fsPrev th{padding:4px 6px;text-align:left;border-bottom:1px solid rgba(255,255,255,.08)}
+  #fsDrop{position:absolute;inset:0;border:3px dashed #e0a92e;border-radius:14px;display:none;align-items:center;justify-content:center;font-size:22px;background:rgba(0,0,0,.5);pointer-events:none}
+  @media (max-width:700px){ #fsWin .card{width:100vw;height:100dvh;border-radius:0} #fsRows .r .dt{display:none} .pcOnly{display:none!important} }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="napNote" class="glass"><span>🖥 FreedomOS - questions + jobs work any time.</span><select id="wallPick" title="Live wallpaper"></select><button id="napWake">👥 Show the crew</button></div>
+  <iframe id="wallBg" title="wallpaper" tabindex="-1" aria-hidden="true"></iframe>
+  <div id="karaoke"><div class="p"></div><div class="c"></div><div class="n"></div></div>
+  <div id="npCard"><img id="npArt" alt=""><div class="tx"><div class="tt" id="npT"></div><div class="ar" id="npA"></div><div class="ln" id="npL"></div></div>
+    <button data-mc="prev" title="Back">⏮</button><button data-mc="play" id="npP" title="Play / pause">⏯</button><button data-mc="next" title="Next">⏭</button></div>
+  <div id="scene"><div id="cv"></div><div id="fsHint" style="display:none;position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:9999;background:rgba(20,24,32,.9);color:#cfe3ff;padding:6px 12px;border-radius:10px;font-size:12px;pointer-events:none">Click anywhere for full screen · Esc to get out</div><div id="bye"><div>The crew is offline.<br><span class="sub" id="byeWhy"></span></div></div></div>
+
+  <div id="ask" class="glass mini" title="Quick question ( / key )">
+    <div id="askPill">⚡ Ask a quick question</div>
+    <div class="q"><input id="askQ" placeholder="⚡ 2016 Civic oil capacity · what does error 0x80070005 mean · 5 ft in cm" enterkeyhint="search" autocomplete="off"><button id="askGo">Ask</button></div>
+    <div id="ansBox"><div id="ans"></div><div id="ansExtra"></div><div id="ansMeta"></div><div id="crew"></div></div>
+    <div id="recent"></div>
+  </div>
+
+  <div id="dock" class="tuck">
+    <div class="pop glass" id="popJob">
+      <b class="t">🧰 Give the crew a job <span class="sub">(big stuff - takes minutes)</span></b>
+      <textarea id="task" rows="2" placeholder="e.g. Summarize every .txt in this folder and list anything about deadlines. Quick questions go in the ⚡ box."></textarea>
+      <input id="folder" placeholder="Folder they can read (optional)" style="margin-top:6px">
+      <div class="row" style="margin-top:6px"><button id="go">Get to work</button><button class="red" id="kill">Shut down</button></div>
+      <b class="t" style="margin-top:10px">Jobs</b>
+      <div id="jobs"><div class="sub">No jobs yet. The crew is standing by.</div></div>
+    </div>
+    <div class="pop glass" id="popMusic">
+      <b class="t" style="display:flex;align-items:center;gap:6px">🎧 WiMix<span style="flex:1"></span><button class="mIco" data-m="open" id="mOpen" title="Show WiMix">🎧</button><button class="mIco" data-m="quit" title="Close WiMix">✕</button></b>
+      <div id="mNow" style="display:flex;gap:10px;align-items:center;margin:8px 0">
+        <img id="mArt" alt="" style="width:64px;height:64px;border-radius:8px;object-fit:cover;background:#1b2130;flex:none">
+        <div style="min-width:0;flex:1"><div id="mTitle" style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Not playing yet</div>
+          <div id="mArtist" class="sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Open WiMix and pick something</div>
+          <div class="bar" style="margin-top:6px"><i id="mBar"></i></div><div class="sub" id="mTime" style="font-size:11px"></div></div>
+      </div>
+      <div class="row" style="justify-content:center;gap:8px"><button data-m="prev" title="Back">⏮</button><button data-m="play" id="mPlay" title="Play / pause" style="min-width:52px">⏯</button><button data-m="next" title="Next">⏭</button><button data-m="like" id="mLike" title="Like">👍</button></div>
+      <div style="display:none"><button data-m="mini" id="mMini">Mini player</button><button data-m="look" id="mLook">Shop look</button></div>
+      <div style="display:none"><button data-m="video" id="mVideo"></button><button data-m="karaoke" id="mKara"></button></div>
+      <div id="mLyr" class="lyr"></div>
+      <div id="lyrBar" class="row" style="display:none!important;justify-content:flex-end;gap:4px;margin-top:4px"><span class="sub" style="font-size:11px">lyrics timing</span>
+        <button class="mIco" onclick="lyrNudge(-.5)" title="Lyrics ahead of the song? hold 'em back">⏪</button><span class="sub" id="lyrOff" style="font-size:11px;min-width:34px;text-align:center">0.0s</span>
+        <button class="mIco" onclick="lyrNudge(.5)" title="Lyrics behind the song? push 'em ahead">⏩</button></div>
+      <div class="sub" style="margin-top:6px;display:none">First time: sign in to your Google account in the WiMix tab - it remembers you. Your keyboard's ⏯ ⏭ keys work too.</div>
+    </div>
+    <div class="pop glass" id="popPx">
+      <b class="t">🎨 Pixel Shop</b>
+      <div class="sub" id="pxStat">closed</div>
+      <div class="sub" id="pxNote" style="margin-top:3px">Makes pictures on your NVIDIA card. Opening it pauses the crew's brain so the GPU is free.</div>
+      <div class="row" id="pxDesk" style="margin-top:8px;justify-content:flex-start">
+        <button class="grn" id="pxStart">Start work</button><button id="pxOpen" disabled>Open shop</button><button class="red" id="pxStop" disabled>Close shop</button>
+      </div>
+      <div id="lite" style="display:none;margin-top:8px">
+        <b class="t">🖌 Pixel Shop Lite <span class="sub">(runs right on this laptop)</span></b>
+        <div class="sub" id="liteStat">checking...</div><div class="bar" id="liteBar" style="display:none"><i id="liteBarI"></i></div>
+        <div id="liteSetup" style="display:none;margin:6px 0"><button class="grn" id="liteSetupBtn">Set up (one time, ~5.5 GB)</button></div>
+        <div id="liteMake" style="display:none">
+          <div id="liteDrop" title="Drop pictures here, click to pick, or paste one">🖼 <b>Drop reference pictures here</b> <span class="sub">(or click / paste - up to 4)</span>
+            <div id="liteRefs"></div></div>
+          <input type="file" id="liteRefIn" accept="image/*" multiple style="display:none">
+          <textarea id="litePrompt" rows="2" placeholder="e.g. a neon city at night, a cat wearing a tiny crown, a red sports car on a mountain road"></textarea>
+          <div class="row" style="margin-top:5px;justify-content:flex-start;gap:6px;flex-wrap:wrap">
+            <select id="liteLook" style="background:rgba(0,0,0,.35);color:var(--txt);border:1px solid var(--edge);border-radius:8px;padding:4px"></select>
+            <label class="sub" style="display:none;gap:4px;align-items:center"><input type="checkbox" id="liteMatch" style="width:auto"> match style</label>
+            <label class="sub" id="liteKeepL" style="display:none;gap:4px;align-items:center" title="Off = copy the dropped picture's own look"><input type="checkbox" id="liteKeep" style="width:auto" checked> + my style</label>
+            <button class="grn" id="liteGo">Make it</button>
+          </div>
+        </div>
+        <div class="sub" id="liteStyle" style="margin-top:5px"></div>
+        <div class="row" style="margin-top:8px"><b style="font-size:12px">Saved in Documents\FreedomOS Pictures</b><button id="liteOpen" style="font-size:11px;padding:2px 8px">📂 Open folder</button></div>
+        <div id="liteGal" class="gal"></div>
+      </div>
+    </div>
+    <div class="pop glass" id="popInfo">
+      <div class="row" style="margin-bottom:6px"><b>🧠 The brain</b><button id="brainSw2"></button></div>
+      <div class="sub" id="brainSwNote" style="margin-bottom:6px"></div>
+      <div class="row"><b>FreedomOS <span id="ver">v1.0</span></b><span class="sub" id="model"></span></div>
+      <div class="sub" id="conn">connecting...</div>
+      <div class="sub" id="brain">🧠 brain: --</div>
+      <div id="brainPick" style="display:flex;gap:6px;margin:6px 0 2px;flex-wrap:wrap"></div>
+      <div id="brainRemote" style="margin:6px 0 2px"></div>
+      <div class="sub" id="brainMsg"></div>
+      <div class="row" style="margin:4px 0"><span class="sub">🥊 Brain race - who talks fastest on this PC?</span><button id="raceGo" style="padding:2px 8px">Race 'em</button></div>
+      <div id="raceBox" class="sub" style="display:none"></div>
+      <div class="bar" id="dlbar" style="display:none"><i id="dlb"></i></div>
+      <div class="row" style="margin-top:6px"><b>GPU</b><span class="sub" id="gtemp">--</span></div>
+      <div class="row sub"><span>GPU busy</span><span id="gutil">--</span></div><div class="bar"><i id="gutilb"></i></div>
+      <div class="row sub"><span>Video memory</span><span id="gmem">--</span></div><div class="bar"><i id="gmemb"></i></div>
+    </div>
+    <div class="pop glass" id="popCrew">
+      <b class="t">👥 The crew <span class="sub">(your local AI agents)</span></b>
+      <div class="row" style="margin:6px 0;justify-content:flex-start;gap:6px;flex-wrap:wrap"><button id="crewSw"></button></div>
+      <div id="crewList" class="sub" style="margin-top:6px"></div>
+    </div>
+    <div class="pop glass" id="popWalls">
+      <b class="t">🖼 Wallpaper <span class="sub">(live web wallpapers)</span></b>
+      <div id="wallHome" style="margin:8px 0"></div>
+      <div class="row" style="justify-content:flex-start"><button id="wallParkOn">👥 Show the crew board</button></div>
+    </div>
+    <div class="pop glass" id="popChats">
+      <div class="subtabs" id="chatTabs"><button data-ct="shop">⚡ Ask</button><button data-ct="claude">💬 Claude</button><button data-ct="web">🔎 Web</button></div>
+      <div class="ct" data-ct="shop" id="ctShop"></div>
+      <div class="ct" data-ct="claude"><div class="sub">Your Claude chats - each one kept on its own.</div><div id="ctCcList" class="ctList"></div>
+        <div class="row" style="margin-top:6px;justify-content:flex-start;gap:6px"><button id="ctCcNew">＋ New Claude chat</button><button id="ctCcOpen">💬 Open the chat window</button></div></div>
+      <div class="ct" data-ct="web"><div style="display:flex;gap:6px"><input id="ctWebQ" placeholder="🔎 Search the web - the brain reads the pages for you" enterkeyhint="search" style="flex:1;min-width:0"><button id="ctWebGo">Search</button><button id="ctWebBro" title="Open WiBro">🌐</button></div>
+        <div class="sub" style="margin-top:6px">Answer + clean links open in the 🔎 window. 🌐 opens a WiBro tab.</div></div>
+    </div>
+    <div id="strip" class="glass">
+      <div class="info"><span class="dot" id="dot"></span><span id="sBrain">🧠 --</span><span id="sCpu" title="CPU temperature">🌡 CPU --</span><span id="sGpu">GPU --</span><span id="sMusic" style="display:none;cursor:pointer" title="WiMix"></span><span id="sJobs"></span><span id="sPx"></span></div>
+      <div class="btns">
+        <button data-pop="popCrew" id="crewBtn2" title="The crew - your agents, crew board on/off">👥</button>
+        <button data-pop="popWalls" id="wallBtn" title="Wallpaper - live web wallpapers">🖼</button>
+        <button id="brainBtn" data-pop="popInfo" title="🧠 Brain - click: on/off · hover: brain options">🧠</button>
+        <button data-pop="popChats" title="Chats - quick questions, Claude, web">💬</button>
+        <button data-pop="popJob" title="Jobs">🧰</button>
+        <button data-pop="popPx" title="Pixel Shop">🎨</button>
+        <button class="gone" data-pop="popInfo" title="Status">📊</button>
+        <button class="gone" id="ccBtn" title="Chat with Claude (C key)">💬</button>
+        <button class="gone" id="webBtn" title="Search the web + clean reader (G key)">🔎</button>
+        <button id="browserBtn" title="WiBro - real browser, ad blocker (B key)">🌐</button>
+        <button id="fsBtn" title="Files on all your devices (F key)">📁</button>
+        <button id="discordBtn" title="Discord">👾</button>
+        <button id="dcOvlBtn" title="Discord overlay - voice, mute, messages on top of everything (Ctrl+Alt+D)">🎙</button>
+        <button id="musicBtn" data-pop="popMusic" title="WiMix - your YouTube Music (Y key)">🎧</button>
+        <button class="gone" id="sleepBtn" title="Crew board on/off (Z key)">👥</button>
+        <button id="hideBtn" title="Hide everything (H key)">✕</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="shop"><div class="bar2"><b>🎨 Pixel Shop</b><span class="sub" id="shopNote"></span><span style="flex:1"></span><button id="shopClose">✕ Back Home</button></div><iframe id="shopFrame" title="Pixel Shop"></iframe></div>
+<div id="ccWin"><div class="card glass">
+  <div class="top"><button id="ccListBtn" title="Your chats">☰</button><b id="ccTitle">💬 Claude</b><span class="sub" id="ccNote"></span><span class="sp"></span>
+    <button id="ccNew" title="Start a new chat">＋ New</button><button id="ccLogin" title="Sign Claude Code in on this PC (one time)">🔑 Log in</button><button id="ccClose">Close</button></div>
+  <div id="ccBody">
+    <div id="ccList"></div>
+    <div id="ccMain">
+      <div id="ccMsgs"></div>
+      <div id="ccPrev"><img id="ccPrevImg" alt=""><span>📷 picture ready to send</span><button id="ccPrevX">✕</button></div>
+      <div id="ccIn">
+        <button id="ccSnap" title="Take a picture">📷</button>
+        <button id="ccPick" title="Pick a picture">🖼</button>
+        <input id="ccFile" type="file" accept="image/*" style="display:none">
+        <input id="ccFileCam" type="file" accept="image/*" capture="environment" style="display:none">
+        <textarea id="ccText" rows="1" placeholder="Ask Claude anything... (Enter sends, Shift+Enter new line)" enterkeyhint="send"></textarea>
+        <button id="ccSend" class="grn">Send</button><button id="ccStop" style="display:none">■ Stop</button>
+      </div>
+    </div>
+  </div>
+</div></div>
+<div id="ccCam"><video id="ccVid" autoplay playsinline muted></video>
+  <div class="row"><button id="ccFlip">🔄 Flip</button><button id="ccShoot" class="grn">📸 Snap it</button><button id="ccCamX">Cancel</button></div></div>
+<div id="ccZoom"><img id="ccZoomImg" alt=""></div>
+<div id="webWin"><div class="card glass">
+  <div id="webTop"><button id="webBack" title="Back" style="display:none">⬅</button><input id="webQ" placeholder="🔎 Search anything - or paste a link to read it clean" autocomplete="off" enterkeyhint="search">
+    <label class="sub" title="Brain reads the top pages and writes a straight answer" style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" id="webBrain"> 🧠 answer</label>
+    <button id="webGo">Search</button><button id="webBrowse" title="Open WiBro (real browser, own window)">🌐</button><button id="webX">✕</button></div>
+  <div id="webBody"><div id="webAns"></div><div id="webList"><div class="sub" style="padding:10px">Search the web without the ads and junk. Turn on 🧠 and the brain reads the top pages and writes you a straight answer.</div></div><div id="webRead" style="display:none"></div></div>
+</div></div>
+<div id="fsWin"><div class="card glass" style="position:relative">
+  <div class="top"><b>📁 Your files</b><span class="sub" id="fsWhere"></span><span class="sp"></span>
+    <button id="fsPairBtn" class="pcOnly">🔗 Link PCs</button><button id="fsClose">Close</button></div>
+  <div id="fsSync"><span id="fsSyncTxt">--</span><div class="bar" id="fsBarW"><i id="fsBar"></i></div><button id="fsNow">⟳ Sync now</button><button id="fsOnOff" class="pcOnly"></button></div>
+  <div id="fsPair">
+    <div><b>Link your PCs</b> - do this once. Both PCs need FreedomOS running and Tailscale on.</div>
+    <div>1) <b>This PC's code</b> (copy it, paste it into FreedomOS's 📁 → 🔗 on the OTHER PC):</div>
+    <textarea id="fsMyCode" readonly></textarea><div><button id="fsCopy">📋 Copy code</button> <span class="sub" id="fsCopyMsg"></span></div>
+    <div>2) <b>Paste the other PC's code here:</b></div>
+    <textarea id="fsTheirCode" placeholder="F35-..."></textarea><div><button id="fsPairGo" class="grn">🔗 Link them</button> <span class="sub" id="fsPairMsg"></span></div>
+    <div id="fsPeers"></div>
+    <div id="fsPrev"></div>
+  </div>
+  <div id="fsTabs"></div>
+  <div id="fsCrumbs"></div>
+  <div id="fsTools"><button id="fsUp">⬆ Upload</button><button id="fsPhotos">📷 Send photos</button><button id="fsMk">＋ Folder</button><span class="sub" id="fsMsg"></span>
+    <input id="fsFile" type="file" multiple style="display:none"><input id="fsPhotoIn" type="file" accept="image/*,video/*" multiple style="display:none"></div>
+  <div id="fsRows"></div>
+  <div id="fsDrop">Drop files here</div>
+</div></div>
+<div id="modal"><div class="card glass"><div class="row"><b id="mTitle"></b><button id="mClose">Close</button></div><div id="mBody"></div></div></div>
+
+<script src="/widget/crew.js?v=1"></script>
+<script>
+/* ⌨ TYPING COMES FIRST: while you're typing in any box, the app's hotkeys (M, N, Z, B, G, Y, H, /...) stay quiet.
+   Every hotkey listens on the window; this catches the key on its way up and stops it there (Escape still closes stuff). */
+const isTypingEl = el => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !/^(checkbox|radio|range|button|submit|color|file)$/i.test(el.type || "")) || !!(el && el.isContentEditable);
+document.addEventListener("keydown", e => { if (isTypingEl(e.target) && e.key !== "Escape") e.stopPropagation(); });
+document.addEventListener("keyup", e => { if (isTypingEl(e.target) && e.key !== "Escape") e.stopPropagation(); });
+/* 📱 ON-SCREEN KEYBOARD: tap any box (tablet mode or phone) and the keyboard pops up */
+let lastTouch = 0;
+addEventListener("pointerdown", e => { if (e.pointerType === "touch" || e.pointerType === "pen") lastTouch = Date.now(); }, true);
+function kbShow(el){ try { if (el && navigator.virtualKeyboard && Date.now() - lastTouch < 1500) navigator.virtualKeyboard.show(); } catch (e) {} }
+function kbPrep(el){                                        // every typing box: right keyboard type, no hotkey fights
+  if (!isTypingEl(el) || el.dataset.kb) return; el.dataset.kb = 1;
+  if (!el.getAttribute("inputmode") && el.tagName === "INPUT" && !el.type.match(/number|email|url|tel/)) el.setAttribute("inputmode", /search|ask|web|q$/i.test(el.id) ? "search" : "text");
+  el.setAttribute("autocapitalize", el.getAttribute("autocapitalize") || "sentences");
+  el.addEventListener("focus", () => kbShow(el));
+  el.addEventListener("pointerup", e => { if (e.pointerType !== "mouse") { if (document.activeElement !== el) el.focus(); kbShow(el); } });
+}
+new MutationObserver(() => document.querySelectorAll("input,textarea,[contenteditable]").forEach(kbPrep)).observe(document.documentElement, { childList: true, subtree: true });
+document.querySelectorAll("input,textarea,[contenteditable]").forEach(kbPrep);
+addEventListener("DOMContentLoaded", () => document.querySelectorAll("input,textarea,[contenteditable]").forEach(kbPrep));
+
+const crew = window.crew = new Crew(document.getElementById("cv"));
+const $ = id => document.getElementById(id);
+const PHONE = () => matchMedia("(max-width: 760px)").matches;
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+// ---------- the slim strip: tucks itself away, pops back when the mouse comes near ----------
+const dock = $("dock"); let tuckT = 0, pinned = "", peek = "", peekT = 0;
+const openPop = () => pinned || peek;
+const busyDock = () => openPop() || dock.contains(document.activeElement);
+function untuck(){ clearTimeout(tuckT); dock.classList.remove("tuck"); }
+function tuckSoon(ms){ clearTimeout(tuckT); tuckT = setTimeout(()=>{ if (!busyDock()) dock.classList.add("tuck"); }, ms || 1800); }
+function drawPops(){
+  const id = openPop();
+  document.querySelectorAll(".pop").forEach(p=>p.classList.toggle("show", p.id === id));
+  document.querySelectorAll("#strip .btns button[data-pop]").forEach(x=>x.classList.toggle("on", x.dataset.pop === pinned));
+}
+dock.addEventListener("mouseenter", ()=>{ untuck(); clearTimeout(peekT); });
+dock.addEventListener("mouseleave", ()=>{ clearTimeout(peekT);
+  peekT = setTimeout(()=>{ peek = ""; drawPops(); tuckSoon(); }, 350); });     // just peeking? close it when the mouse leaves
+addEventListener("mousemove", e=>{ if (e.clientY < 80 && e.clientX < innerWidth - 590) { untuck(); tuckSoon(2500); } });   // mouse near the top -> menu bar pops up
+document.querySelectorAll("#strip .btns button[data-pop]").forEach(b=>{
+  b.addEventListener("mouseenter", ()=>{ if (pinned) return; clearTimeout(peekT); peek = b.dataset.pop; drawPops(); });   // hover = quick look
+  b.onclick = ()=>{ const id = b.dataset.pop; pinned = pinned === id ? "" : id; peek = ""; drawPops(); if (!pinned) tuckSoon(); };  // click = keep it open
+});
+addEventListener("mousedown", e=>{ if (openPop() && !dock.contains(e.target)) { pinned = ""; peek = ""; drawPops(); tuckSoon(600); } });
+
+// ---------- 🧭 inside the FreedomOS app: the app draws the toolbar under its tabs, we just do the pop-ups ----------
+if (window.chrome && chrome.webview) {
+  document.body.classList.add("native");
+  const post = m => { try { chrome.webview.postMessage(m); } catch (e) {} };
+  const barState = () => ({
+    btns: [...document.querySelectorAll("#strip .btns button")].filter(b => b.id !== "hideBtn" && !b.classList.contains("gone"))
+      .map(b => ({ id: b.id || "", pop: b.dataset.pop || "", t: b.textContent.trim(), tip: b.title || "", on: !!b.dataset.pop && b.dataset.pop === pinned })),
+    info: [$("sBrain").textContent, $("sCpu").textContent, $("sGpu").textContent, $("sJobs").textContent, $("sPx").textContent].filter(Boolean).join("   "),
+    up: !!($("dot").className || "").match(/ok|on|ready/) || true });
+  let lastBar = "", lastRect = "";
+  const sendBar = () => { const s = JSON.stringify(barState()); if (s !== lastBar) { lastBar = s; post("bar:" + s); } };
+  const sendPop = () => {
+    const id = openPop(); let r = "none";
+    if (id) { const b = $(id).getBoundingClientRect(); if (b.width > 0) r = [b.left, b.top, b.width, b.height].map(v => Math.round(v * devicePixelRatio)).join(","); }
+    if (r !== lastRect) { lastRect = r; post("pop:" + r); }
+  };
+  setInterval(sendBar, 1000); setTimeout(sendBar, 200); setInterval(sendPop, 200);
+  window.f35NativePop = (id, pin) => {          // id "" = close (pin=true closes a kept-open one too)
+    if (id === "popMusic" && pin && !(MUS.s && MUS.s.running)) musicCtl("start");      // 🎧 = WiMix opens tucked away + music starts
+    if (!id) { peek = ""; if (pin) pinned = ""; }
+    else if (pin) { pinned = pinned === id ? "" : id; peek = ""; }
+    else if (!pinned) peek = id;
+    if (openPop()) untuck(); drawPops(); sendPop(); sendBar();
+  };
+  window.f35NativeClick = id => { if (id === "brainBtn" && window.f35BrainToggle) f35BrainToggle(); else { const b = $(id); if (b) b.click(); } setTimeout(sendBar, 400); };
+}
+
+// ---------- hide everything (H key) - remembers your pick ----------
+function setHidden(h){
+  document.body.classList.toggle("hid", h);
+  try { localStorage.setItem("f35_panel_hidden", h ? "1" : "0"); } catch(e) {}
+  requestAnimationFrame(()=>dispatchEvent(new Event("resize")));
+}
+$("hideBtn").onclick = ()=> setHidden(true);
+addEventListener("keydown", e=>{
+  const typing = /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+  if ((e.key==="h"||e.key==="H") && !typing && !e.ctrlKey && !e.altKey && !e.metaKey) setHidden(!document.body.classList.contains("hid"));
+  if (e.key==="/" && !typing) { e.preventDefault(); setHidden(false); openAsk(); }
+  if (e.key==="Escape") { closeAsk(); document.activeElement.blur(); }
+});
+try { if (localStorage.getItem("f35_panel_hidden")==="1") setHidden(true); } catch(e) {}
+
+// ---------- 🔧 shop quick-ask: small box, answer lands right in it ----------
+let recent = [], last = null, askT = 0;
+const ask$ = $("ask");
+function openAsk(){ if (window.chrome && chrome.webview && window.f35OpenShop && $("ask").parentNode.id !== "ctShop") return f35OpenShop();
+  clearTimeout(askT); ask$.classList.remove("mini"); ask$.classList.add("open"); $("askQ").focus(); $("askQ").select(); kbShow($("askQ")); }
+function closeAsk(){ if (PHONE()) return; ask$.classList.add("mini"); ask$.classList.remove("open"); }
+function shrinkSoon(ms){ clearTimeout(askT); askT = setTimeout(()=>{ if (!ask$.matches(":hover") && document.activeElement !== $("askQ")) closeAsk(); }, ms); }
+$("askPill").onclick = openAsk;
+ask$.addEventListener("mouseleave", ()=>{ if (!ask$.classList.contains("mini")) shrinkSoon(last ? 20000 : 4000); });
+ask$.addEventListener("mouseenter", ()=>clearTimeout(askT));
+$("askQ").addEventListener("blur", ()=>shrinkSoon(last ? 20000 : 4000));
+function pill(){ $("askPill").textContent = last ? `⚡ ${last.answer}` + (last.sure === "high" ? "" : "  ⚠") : "⚡ Ask a quick question"; $("askPill").title = last ? last.q : ""; }
+function showAns(a){
+  last = a; pill();
+  $("ansBox").style.display = "block"; $("ans").textContent = a.answer;
+  $("ans").className = a.answer.length > 70 ? "xlong" : a.answer.length > 26 ? "long" : "";   // long answers get smaller so nothing's cut
+  $("ansExtra").textContent = a.extra || "";
+  const src = (a.sources||[]).map(s=>`<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.site)}</a>`).join(" · ");
+  $("ansMeta").innerHTML = `<span class="sure ${a.sure==="high"?"high":"check"}">${a.sure==="high"?"✔ sources agree":"⚠ double-check"}</span>` +
+    (src ? `<span class="sub">${src}</span>` : `<span class="sub">from memory</span>`) +
+    `<span class="sub">${a.cached ? "· instant" : a.secs!=null ? "· "+a.secs+"s" : ""}</span>` +
+    (a.checking ? "" : `<button class="crewBtn" id="crewBtn" title="Make every agent look it up their own way and vote">🔍 crew check</button>`) +
+    (/^No web|^Couldn't find/i.test(a.answer||"") ? "" : `<button class="crewBtn" id="goodBtn" title="Right answer - save it so we can train the brain on it later">👍 good</button><button class="crewBtn" id="badBtn" title="Wrong answer - save it as one to fix">👎</button>`);
+  if ($("crewBtn")) $("crewBtn").onclick = crewCheck;
+  const rate = async (good) => { try { const r = await fetch("/ask/rate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:a.q, answer:a.answer, extra:a.extra||"", sources:a.sources||[], good})}); const d = await r.json();
+      const b = $(good?"goodBtn":"badBtn"); if (b) { b.textContent = d.error ? "⚠" : good ? `👍 saved (${d.count})` : "👎 noted"; b.disabled = true; } } catch(e){} };
+  if ($("goodBtn")) $("goodBtn").onclick = () => rate(true);
+  if ($("badBtn")) $("badBtn").onclick = () => { const fix = prompt("What's the RIGHT answer? (leave empty to just mark it wrong)"); a.fix = fix || ""; rate(false); };
+  if (a.crew) drawCrew(a.crew.votes, a.crew); else if (a.checking) drawCrew([], null, true); else $("crew").innerHTML = "";
+}
+function drawRecent(){
+  $("recent").innerHTML = recent.slice(0,6).map((a,i)=>`<span data-i="${i}" title="${esc(a.q)} → ${esc(a.answer)}">${esc(a.q)}</span>`).join("");
+  document.querySelectorAll("#recent span").forEach(el=>el.onclick=()=>{ const a = recent[+el.dataset.i]; $("askQ").value = a.q; showAns(a); });
+}
+// ---------- 🔍 the whole crew double-checks a ⚠ answer ----------
+let crewVotes = [];
+function drawCrew(votes, done, waiting){
+  crewVotes = votes || [];
+  const first = last ? last.answer : "";
+  const same = (a,b)=>{ const n = v=>{ const m = String(v).toLowerCase().match(/(\d+(?:\.\d+)?)\s*(n[·.-]?m)?/); return m ? (+m[1])/(m[2]?1.356:1) : null; };
+    const x=n(a), y=n(b); return x!=null && y!=null ? Math.abs(x-y) <= .015*Math.max(x,y,1) : String(a).toLowerCase().replace(/\W/g,"").slice(0,24)===String(b).toLowerCase().replace(/\W/g,"").slice(0,24); };
+  let h = (waiting || !done) ? `<div class="sub">🔍 The crew is double-checking it... (${crewVotes.length} in)</div>` : "";
+  h += crewVotes.map(v=>`<div class="cv"><b>${esc(v.who)}</b><span class="v ${v.answer && same(v.answer, done ? done.answer : first) ? "ok" : "no"}">${esc(v.answer || "dunno")}</span><span class="s" title="${esc(v.says)} ${v.site?"("+esc(v.site)+")":""}">${esc(v.says)}</span></div>`).join("");
+  if (done) h += `<div class="verdict">${done.verdict==="agree" ? `✔ Crew backs it: ${done.count}/${done.total} say ${esc(done.answer)}` :
+                  done.verdict==="different" ? `⚠ ${done.count}/${done.total} of the crew say ${esc(done.answer)} - not ${esc(first)}` :
+                  `⚠ Crew's split - look it up in the manual`}</div>`;
+  $("crew").innerHTML = h;
+}
+async function crewCheck(){
+  if (!last) return; drawCrew([], null, true);
+  try { const r = await fetch("/ask/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:last.q})}); const d = await r.json();
+    if (d.error) $("crew").innerHTML = `<div class="sub">⚠ ${esc(d.error)}</div>`; } catch(e) { $("crew").innerHTML = `<div class="sub">⚠ couldn't reach FreedomOS</div>`; }
+}
+async function ask(){
+  const q = $("askQ").value.trim(); if (!q) return;
+  openAsk(); $("askGo").disabled = true; $("ansBox").style.display = "block"; $("ans").className = "wait"; $("ans").textContent = "🔎 looking it up...";
+  $("ansExtra").textContent = ""; $("ansMeta").innerHTML = ""; $("crew").innerHTML = "";
+  try { const r = await fetch("/ask",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
+    const d = await r.json();
+    if (d.error) { $("ans").className = "wait"; $("ans").textContent = "⚠ " + d.error; }
+    else { showAns(d); recent = [d, ...recent.filter(x=>x.q.toLowerCase()!==q.toLowerCase())]; drawRecent(); $("askQ").select(); } }
+  catch(e) { $("ans").className = "wait"; $("ans").textContent = "⚠ couldn't reach FreedomOS"; }
+  $("askGo").disabled = false;
+}
+$("askGo").onclick = ask;
+$("askQ").addEventListener("keydown", e=>{ if (e.key==="Enter") { e.preventDefault(); ask(); } });
+fetch("/ask").then(r=>r.json()).then(d=>{ recent = d.recent||[]; drawRecent(); }).catch(()=>{});
+
+// ---------- jobs ----------
+const jobs = {};
+function renderJobs(){
+  const arr = Object.values(jobs).sort((a,b)=>b.created-a.created).slice(0,25);
+  const run = arr.filter(j=>["queued","planning","working","merging"].includes(j.status)).length;
+  $("sJobs").textContent = run ? `🧰 ${run} job${run>1?"s":""} running` : "";
+  if (!arr.length) return;
+  $("jobs").innerHTML = arr.map(j=>{
+    const pct = j.total? Math.round(j.done/j.total*100) : (j.status==="done"?100:5);
+    return `<div class="job" data-id="${j.id}"><div class="row"><span class="chip ${j.status}">${j.status}</span><span class="sub">#${j.id} · ${j.done}/${j.total||"?"}</span></div>
+      <div style="margin:3px 0">${esc(j.task.slice(0,120))}</div><div class="bar"><i style="width:${pct}%"></i></div>${(j.claude_check||[]).length? `<div class="sub" style="color:var(--warn)">🔍 ${j.claude_check.length} for Claude to check</div>`:""}</div>`;
+  }).join("");
+  document.querySelectorAll(".job").forEach(el=>el.onclick=()=>openJob(el.dataset.id));
+}
+async function openJob(id){
+  const j = await (await fetch(`/jobs/${id}`)).json();
+  $("mTitle").textContent = `Job #${j.id} — ${j.status}`;
+  let h = `<p class="sub">${esc(j.task)}</p>`;
+  if (j.output_file) h += `<p class="sub">Saved to: ${esc(j.output_file)}</p>`;
+  if (j.error) h += `<p style="color:var(--bad)">${esc(j.error)}</p>`;
+  if (j.result) h += `<b>Final answer</b><pre>${esc(j.result)}</pre>`;
+  if ((j.claude_check||[]).length) h += `<p style="color:var(--warn)">🔍 For Claude to spot-check:<br>${j.claude_check.map(esc).join("<br>")}</p>`;
+  for (const p of j.pieces||[]) h += `<details><summary>${esc(p.worker||"?")} — ${esc(p.title)} (${p.status}${p.review? " · Checker: "+esc(p.review.slice(0,80)):""}${p.tries>1? " · redone":""})</summary><pre>${esc(p.output||"")}</pre></details>`;
+  $("mBody").innerHTML = h; $("modal").style.display="flex";
+}
+$("mClose").onclick = ()=> $("modal").style.display="none";
+$("go").onclick = async ()=>{
+  const task = $("task").value.trim(); if (!task) return;
+  $("go").disabled = true;
+  try { const r = await fetch("/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task,folder:$("folder").value.trim()})});
+    const d = await r.json(); if (d.error) alert(d.error); else $("task").value="";
+    if (d.quick) { $("askQ").value = d.quick.q; openAsk(); showAns(d.quick); recent = [d.quick, ...recent]; drawRecent(); if (PHONE()) scrollTo({top:0,behavior:"smooth"}); } }
+  catch(e) { alert("couldn't reach the boss"); }
+  $("go").disabled = false;
+};
+$("kill").onclick = async ()=>{ if (confirm("Shut FreedomOS down and free up the GPU + RAM?")) await fetch("/shutdown",{method:"POST"}); };
+
+// ---------- Pixel Shop ----------
+let pxState = {status:"off"};
+function setPixel(p){
+  if (!p) return; pxState = p;
+  $("pxDesk").style.display = p.desktop_only ? "none" : "flex";
+  const words = {off:"⚪ closed", starting:"⏳ opening up...", ready:"🟢 open for business", working:"🔨 making pictures", failed:"💥 busted"};
+  $("pxStat").textContent = (words[p.status] || p.status || "closed") + (p.made ? ` · ${p.made} made` : "");
+  $("sPx").textContent = ["ready","working","starting"].includes(p.status) ? "🎨 " + (p.status === "working" ? "working" : p.status === "starting" ? "opening" : "open") : "";
+  if (p.status === "failed" || p.status === "starting" || p.status === "working") $("pxNote").textContent = p.detail || "";
+  else if (p.status === "ready") $("pxNote").textContent = "Crew link: \"Pixel Shop crew link.txt\" in your Claude folder.";
+  else if (p.desktop_only) $("pxNote").textContent = "Desktop only - the Pixel Shop needs the NVIDIA card. Use it on the big PC.";
+  else if (p.installed === false) $("pxNote").textContent = "Not installed - run the FreedomOS .bat.";
+  else $("pxNote").textContent = "Makes pictures on your NVIDIA card. Opening it pauses the crew's brain so the GPU is free.";
+  const open = ["ready","working"].includes(p.status);
+  $("pxStart").disabled = open || p.status === "starting" || !!p.desktop_only;
+  $("pxOpen").disabled = !open;
+  $("pxStop").disabled = !p.status || p.status === "off";
+  $("shopNote").textContent = words[p.status] || "";
+  if (p.status === "off" && $("shop").style.display === "flex") { $("shop").style.display = "none"; $("shopFrame").removeAttribute("src"); }
+}
+$("pxStart").onclick = async ()=>{
+  $("pxStart").disabled = true; setPixel({...pxState, status:"starting", detail:"pausing the crew's brain..."});
+  try { await fetch("/pixel/start",{method:"POST"}); } catch(e) { $("pxNote").textContent = "⚠ couldn't reach the boss"; }
+};
+$("pxOpen").onclick = ()=>{ if (window.chrome && chrome.webview && crew.asleep) { chrome.webview.postMessage("app:pixel"); return; }   // FreedomOS app = its own tab
+  if (!$("shopFrame").src) $("shopFrame").src = "/pixel/app/"; $("shop").style.display = "flex"; };
+$("shopClose").onclick = ()=>{ $("shop").style.display = "none"; };
+$("pxStop").onclick = async ()=>{
+  if (!confirm("Close the Pixel Shop and give the GPU back to the crew?")) return;
+  $("shop").style.display = "none"; $("shopFrame").removeAttribute("src");
+  await fetch("/pixel/stop",{method:"POST"}).catch(()=>{});
+};
+fetch("/pixel/status").then(r=>r.json()).then(setPixel).catch(()=>{});
+
+// ---------- status ----------
+function setGpu(g){
+  if (!g || g.util==null) return;
+  $("gutil").textContent = g.util+"%"; $("gutilb").style.width = g.util+"%";
+  $("gmem").textContent = `${(g.mem_used/1024).toFixed(1)} / ${(g.mem_total/1024).toFixed(1)} GB`;
+  $("gmemb").style.width = (g.mem_used/g.mem_total*100)+"%";
+  $("gtemp").textContent = `${g.temp}°C${g.power? " · "+Math.round(g.power)+"W":""}`;
+  $("sGpu").innerHTML = `GPU ${g.util}% · ${(g.mem_used/1024).toFixed(1)}GB · ${heat(g.temp)}`;
+}
+// 🌡 hot = orange, cooking = red
+const heat = t => t==null ? "--" : `<b style="color:${t>=85?"#ff5a5a":t>=72?"#ffb347":"#8fe39a"}">${Math.round(t)}°C</b>`;
+function setCpu(c){ if (!c) return; $("sCpu").innerHTML = `🌡 CPU ${heat(c.temp)}`; }
+function setEngine(e){
+  if (!e) return;
+  const icon = {ready:"🟢",downloading:"⬇️",loading:"⏳",failed:"💥",off:"⚪"}[e.status]||"⚪";
+  $("brain").textContent = `🧠 brain: ${icon} ${e.status} ${e.detail||""}`;
+  $("sBrain").textContent = `🧠 ${REMOTE_NOW?"🖥 "+(REMOTE_NOW.brain==="big"?"35B":REMOTE_NOW.brain==="small"?"9B":REMOTE_NOW.brain==="bonsai"?"Bonsai":REMOTE_NOW.brain==="arete"?"Arete":REMOTE_NOW.brain):brainNow==="big"?"35B":brainNow==="small"?"9B":brainNow==="bonsai"?"Bonsai":brainNow==="arete"?"Arete":""} ${icon} ${e.status === "ready" ? "ready" : e.status}`;
+  const m = /([\d.]+) \/ ~([\d.]+)/.exec(e.detail||"");
+  $("dlbar").style.display = (e.status==="downloading" && m)? "block":"none";
+  if (m) $("dlb").style.width = Math.min(100, m[1]/m[2]*100)+"%";
+}
+// ---------- pick the brain: small 9B (default) or big 35B (NVIDIA desktop only) ----------
+let brainNow = "";
+const BR_NAME = id => id==="small"?"🧠 Small 9B":id==="big"?"🧠 Big 35B":id==="bonsai"?"🌳 Bonsai 27B":id==="arete"?"🗽 Arete 27B":"🧠 "+esc(id);
+async function drawRemote(){
+  const box = $("brainRemote"); let d;
+  try { d = await (await fetch("/brain/remote")).json(); } catch(e) { return; }
+  if (!d || d.error === "not linked" || !d.peer) { box.innerHTML = ""; return; }
+  const cur = REMOTE_NOW;
+  box.innerHTML = `<div class="sub">🖥 Use <b>${esc(d.peer)}</b>'s brain (it does the thinking, this PC just shows the screen)${d.error?" - ⚠ "+esc(d.error):""}</div>
+    <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">${(d.choices||[]).map(c=>`<button data-rb="${esc(c.id)}" class="${cur && cur.brain===c.id?"on":""}" title="${esc(c.label)}">🖥 ${BR_NAME(c.id)}</button>`).join("")}</div>`;
+  box.querySelectorAll("[data-rb]").forEach(el=>el.onclick=async()=>{
+    $("brainMsg").textContent = `asking ${d.peer} to load it... (first time it downloads there)`;
+    try { const r = await fetch("/brain",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pick:"remote:"+el.dataset.rb})});
+      const x = await r.json(); if (x.error) $("brainMsg").textContent = "⚠ " + x.error; else { setBrain(x); $("brainMsg").textContent = `Using ${d.peer}'s brain. This PC's brain is off - saves power.`; } }
+    catch(e) { $("brainMsg").textContent = "⚠ couldn't reach the boss"; }
+  });
+}
+let REMOTE_NOW = null;
+function setBrain(b){
+  if (!b) return; brainNow = b.now; REMOTE_NOW = b.remote || null; drawRemote();
+  $("brainPick").innerHTML = (b.choices||[]).map(c=>`<button data-b="${esc(c.id)}" class="${c.id===b.now?"on":""}" ${c.ok?"":"disabled"}
+     title="${esc(c.label)}${c.gb? " · "+c.gb+" GB":""}">${BR_NAME(c.id)}${c.ok?"":" (desktop only)"}</button>`).join("");
+  document.querySelectorAll("#brainPick button").forEach(el=>el.onclick=async()=>{
+    if (el.dataset.b === brainNow) return;
+    $("brainMsg").textContent = "swapping brains... (first time downloads it)";
+    try { const r = await fetch("/brain",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pick:el.dataset.b})});
+      const d = await r.json(); if (d.error) $("brainMsg").textContent = "⚠ " + d.error; else { setBrain(d); $("brainMsg").textContent = "Swapped. Loading it up..."; } }
+    catch(e) { $("brainMsg").textContent = "⚠ couldn't reach the boss"; }
+  });
+}
+// ---------- brain race: every brain this PC can run, same question, bar graph of speed ----------
+const RACE_COL = { small:"#3b82c4", big:"#c4573b", bonsai:"#3f9a5c", arete:"#b58a2e" };
+function drawRace(R){
+  if (!R) return; const box = $("raceBox"), res = R.results || {}, ids = Object.keys(res);
+  $("raceGo").disabled = !!R.running; $("raceGo").textContent = R.running ? "racing..." : "Race 'em";
+  if (!ids.length && !R.running) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const top = Math.max(1, ...ids.map(i => res[i].tps || 0));
+  box.innerHTML = (R.running ? `<div>🏁 ${esc(R.now||"")}</div>` : "") + ids.map(i => { const r = res[i];
+    return r.error ? `<div>${esc(r.label||i)}: ⚠ ${esc(r.error)}</div>`
+      : `<div style="margin:3px 0" title="${esc(r.said||"")}"><div style="display:flex;justify-content:space-between"><span>${esc(r.label||i)}</span><span><b>${r.tps}</b> tok/s · reads ${r.read_tps}/s</span></div>
+         <div class="bar"><i style="width:${Math.round(100*(r.tps||0)/top)}%;background:${RACE_COL[i]||"#888"}"></i></div></div>`; }).join("")
+    + (ids.length && !R.running ? `<div style="opacity:.7">${esc(Object.values(res)[0].pc||"")} · ${esc(Object.values(res)[0].when||"")} · hover a bar to hear what it said</div>` : "");
+}
+$("raceGo").onclick = async () => {
+  if (!confirm("Race every brain? Takes a few minutes (new brains download the first time: Bonsai ~7.6 GB, Arete ~15 GB). The crew pauses while it runs.")) return;
+  try { const r = await fetch("/brain/race", {method:"POST"}); const d = await r.json(); if (d.error) $("brainMsg").textContent = "⚠ " + d.error; else drawRace(d); }
+  catch(e) { $("brainMsg").textContent = "⚠ couldn't reach the boss"; }
+};
+fetch("/brain/race").then(r => r.json()).then(drawRace).catch(()=>{});
+// ---------- 💬 chat with Claude: Claude Code on this PC, your plan. Pictures from your camera. 📌 pins stay on top ----------
+const CC = { list: [], cur: null, chat: null, pic: null, installed: true, facing: "environment", stream: null };
+const ccEsc = t => esc(t||"");
+function ccMd(t){            // tiny markdown: ``` blocks, `code`, **bold**, links
+  const parts = String(t||"").split(/```/);
+  return parts.map((p,i)=>{ if (i%2) return `<pre>${ccEsc(p.replace(/^[a-z]*\n/,""))}</pre>`;
+    if (i < parts.length-1) p = p.replace(/\n+$/, ""); if (i > 0) p = p.replace(/^\n+/, "");
+    return ccEsc(p).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+      .replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>'); }).join("");
+}
+function ccDrawList(){
+  const pins = CC.list.filter(c=>c.pinned), rest = CC.list.filter(c=>!c.pinned);
+  const row = c => `<div class="it ${CC.cur===c.id?"on":""}" data-id="${ccEsc(c.id)}"><span class="tt">${c.busy?"⏳ ":""}${ccEsc(c.title)}</span>
+     <button class="pin ${c.pinned?"pinned":""}" data-pin="${ccEsc(c.id)}" title="${c.pinned?"Unpin":"Pin it"}">📌</button><button data-del="${ccEsc(c.id)}" title="Delete">🗑</button></div>`;
+  $("ccList").innerHTML = (pins.length ? `<div class="lbl">📌 PINNED</div>` + pins.map(row).join("") : "")
+    + `<div class="lbl">CHATS</div>` + (rest.length ? rest.map(row).join("") : `<div class="sub" style="padding:6px">No chats yet.</div>`);
+  $("ccList").querySelectorAll(".it").forEach(el=>el.onclick=e=>{ if (e.target.closest("button")) return; ccOpen(el.dataset.id); });
+  $("ccList").querySelectorAll("[data-pin]").forEach(b=>b.onclick=()=>{ const c = CC.list.find(x=>x.id===b.dataset.pin); ccAct("pin", b.dataset.pin, {on: !c.pinned}); });
+  $("ccList").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{ if (confirm("Delete this chat?")) ccAct("delete", b.dataset.del); });
+}
+function ccDrawChat(){
+  const c = CC.chat, box = $("ccMsgs");
+  $("ccTitle").textContent = "💬 " + (c ? c.title : "Claude");
+  const busy = !!(c && c.busy); $("ccSend").style.display = busy ? "none" : ""; $("ccStop").style.display = busy ? "" : "none";
+  if (!c || !c.msgs.length) { box.innerHTML = `<div class="hello">💬 Straight line to Claude.<br><br>Type a question, or hit 📷 to snap a picture of whatever you need help with.<br><br>Runs on your Claude plan through Claude Code on this PC.${CC.installed?"":"<br><br>⚠ Claude Code isn't installed yet - run the FreedomOS .bat."}</div>`; return; }
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.innerHTML = c.msgs.map(m => `<div class="m ${m.role==="you"?"you":"claude"} ${m.error?"err":""}">${m.img?`<img src="/cc/pic/${encodeURIComponent(m.img)}" alt="your picture">`:""}${m.role==="you"?ccEsc(m.text):ccMd(m.text)||(busy?"…":"")}${(m.tools||[]).length?`<div class="tools">${m.tools.slice(-4).map(ccEsc).join("<br>")}</div>`:""}${m.secs?`<div class="tools">${m.secs}s</div>`:""}</div>`).join("")
+    + (busy && c.msgs[c.msgs.length-1].role==="you" ? `<div class="m claude">thinking… 🧠</div>` : "");
+  box.querySelectorAll("img").forEach(i=>i.onclick=()=>{ $("ccZoomImg").src = i.src; $("ccZoom").style.display = "flex"; });
+  if (near || busy) box.scrollTop = box.scrollHeight;
+}
+async function ccFetch(url, body){
+  const r = await fetch(url, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)} : {});
+  return r.json();
+}
+async function ccLoad(){ try { const d = await ccFetch("/cc"); CC.list = d.chats||[]; CC.installed = d.installed; ccDrawList(); if (!CC.chat) ccDrawChat(); } catch(e){} }
+async function ccOpen(id){
+  CC.cur = id; $("ccWin").classList.remove("list");
+  try { CC.chat = id ? await ccFetch("/cc/chat/" + encodeURIComponent(id)) : null; } catch(e) { CC.chat = null; }
+  ccDrawList(); ccDrawChat(); $("ccMsgs").scrollTop = 1e9;
+}
+async function ccAct(act, id, extra){
+  const d = await ccFetch("/cc/act", Object.assign({act, id}, extra||{}));
+  if (d.error) { $("ccNote").textContent = "⚠ " + d.error; return; }
+  CC.list = d.list || CC.list;
+  if (act === "delete" && id === CC.cur) { CC.cur = null; CC.chat = null; }
+  if (d.chat && (act === "new" || id === CC.cur)) { CC.chat = d.chat; CC.cur = d.chat.id; }
+  ccDrawList(); ccDrawChat();
+}
+async function ccSend(){
+  const text = $("ccText").value.trim(); if (!text && !CC.pic) return;
+  if (CC.chat && CC.chat.busy) return;
+  $("ccSend").disabled = true; $("ccNote").textContent = CC.pic ? "sending the picture..." : "";
+  try {
+    const d = await ccFetch("/cc/send", {id: CC.cur, text, image: CC.pic});
+    if (d.error) { $("ccNote").textContent = "⚠ " + d.error; return; }
+    $("ccText").value = ""; ccSetPic(null); CC.list = d.list; CC.chat = d.chat; CC.cur = d.chat.id; $("ccNote").textContent = "";
+    ccDrawList(); ccDrawChat();
+  } catch(e) { $("ccNote").textContent = "⚠ couldn't reach the boss"; }
+  finally { $("ccSend").disabled = false; }
+}
+function ccSetPic(url){ CC.pic = url; $("ccPrev").style.display = url ? "flex" : "none"; if (url) $("ccPrevImg").src = url; }
+function ccShrink(src){       // big phone photos -> max 1600px JPEG so they send fast
+  return new Promise(res=>{ const im = new Image(); im.onload = ()=>{ const k = Math.min(1, 1600 / Math.max(im.width, im.height));
+    const cv = document.createElement("canvas"); cv.width = Math.round(im.width*k); cv.height = Math.round(im.height*k);
+    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL("image/jpeg", .88)); }; im.onerror = ()=>res(null); im.src = src; });
+}
+function ccFileIn(f){ if (!f) return; const r = new FileReader(); r.onload = async ()=>ccSetPic(await ccShrink(r.result)); r.readAsDataURL(f); }
+$("ccFile").onchange = e => { ccFileIn(e.target.files[0]); e.target.value = ""; };
+$("ccFileCam").onchange = e => { ccFileIn(e.target.files[0]); e.target.value = ""; };
+$("ccPick").onclick = () => $("ccFile").click();
+$("ccPrevX").onclick = () => ccSetPic(null);
+async function ccCamStart(){
+  if (CC.stream) CC.stream.getTracks().forEach(t=>t.stop());
+  CC.stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: CC.facing, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+  $("ccVid").srcObject = CC.stream;
+}
+function ccCamStop(){ if (CC.stream) CC.stream.getTracks().forEach(t=>t.stop()); CC.stream = null; $("ccCam").style.display = "none"; }
+$("ccSnap").onclick = async () => {
+  const phone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  if (phone || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { $("ccFileCam").click(); return; }   // phone: its own camera app
+  try { $("ccCam").style.display = "flex"; await ccCamStart(); }
+  catch(e) { ccCamStop(); $("ccNote").textContent = "⚠ no camera access - picking a picture instead"; $("ccFile").click(); }
+};
+$("ccFlip").onclick = async () => { CC.facing = CC.facing === "environment" ? "user" : "environment"; try { await ccCamStart(); } catch(e){} };
+$("ccShoot").onclick = async () => { const v = $("ccVid"); if (!v.videoWidth) return;
+  const cv = document.createElement("canvas"); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext("2d").drawImage(v, 0, 0);
+  ccSetPic(await ccShrink(cv.toDataURL("image/jpeg", .92))); ccCamStop(); $("ccText").focus(); };
+$("ccCamX").onclick = ccCamStop;
+$("ccZoom").onclick = () => $("ccZoom").style.display = "none";
+$("ccText").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ccSend(); } });
+$("ccText").addEventListener("input", e => { const t = e.target; t.style.height = "auto"; t.style.height = Math.min(160, t.scrollHeight) + "px"; });
+$("ccText").addEventListener("paste", e => { const it = [...(e.clipboardData||{}).items||[]].find(i=>i.type.startsWith("image/")); if (it) { e.preventDefault(); ccFileIn(it.getAsFile()); } });
+$("ccSend").onclick = ccSend;
+$("ccStop").onclick = () => CC.cur && ccAct("stop", CC.cur);
+$("ccNew").onclick = () => { CC.cur = null; CC.chat = null; ccSetPic(null); ccDrawList(); ccDrawChat(); $("ccWin").classList.remove("list"); $("ccText").focus(); };
+$("ccListBtn").onclick = () => $("ccWin").classList.toggle("list");
+$("ccLogin").onclick = async () => { const d = await ccFetch("/cc/login", {}); $("ccNote").textContent = d.error ? "⚠ " + d.error : "A sign-in window popped up on this PC - sign in there, then close it."; };
+function ccShow(on){ $("ccWin").classList.toggle("open", on); if (on) { ccLoad(); if (CC.cur) ccOpen(CC.cur); else ccDrawChat(); $("ccText").focus(); kbShow($("ccText")); } else ccCamStop(); }
+$("ccBtn").onclick = () => ccShow(!$("ccWin").classList.contains("open"));
+$("ccClose").onclick = () => ccShow(false);
+addEventListener("keydown", e => { const typing = /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+  if ((e.key==="c"||e.key==="C") && !typing && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); ccShow(true); }
+  if (e.key==="Escape" && $("ccWin").classList.contains("open")) { if ($("ccCam").style.display==="flex") ccCamStop(); else ccShow(false); } });
+function ccOnEvent(ev){
+  if (ev.type === "cc") { CC.list = ev.list || CC.list; if (ev.chat && ev.chat.id === CC.cur) { CC.chat = ev.chat; ccDrawChat(); } ccDrawList(); }
+  if (ev.type === "cc_live" && CC.chat && ev.id === CC.cur) { const m = CC.chat.msgs[CC.chat.msgs.length-1];
+    if (m && m.role === "claude") { m.text = ev.text; m.tools = ev.tools; } else CC.chat.msgs.push({role:"claude", text: ev.text, tools: ev.tools});
+    ccDrawChat(); }
+}
+// ---------- 📁 files: the same files on the laptop, desktop and phone ----------
+const FS = { info: null, folder: "Shared", path: "", rows: [] };
+const fsSize = n => n == null ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n/1024).toFixed(0) + " KB" : n < 1073741824 ? (n/1048576).toFixed(1) + " MB" : (n/1073741824).toFixed(2) + " GB";
+const fsDate = t => { const d = new Date(t*1000); return d.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + " " + d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}); };
+const fsUrl = (rel, view) => `/files/get?folder=${encodeURIComponent(FS.folder)}&path=${encodeURIComponent(rel)}${view?"&view=1":""}`;
+const FS_IMG = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const fsIcon = r => r.dir ? "📂" : /\.(png|jpe?g|gif|webp|bmp)$/i.test(r.name) ? "🖼" : /\.(mp4|mov|mkv|webm)$/i.test(r.name) ? "🎞" : /\.bat$/i.test(r.name) ? "⚙" : /\.(txt|md|json|csv|log)$/i.test(r.name) ? "📝" : /\.pdf$/i.test(r.name) ? "📕" : "📄";
+function fsDrawInfo(){
+  const f = FS.info; if (!f) return; const st = f.status || {}, peers = f.peers || [];
+  $("fsTabs").innerHTML = Object.keys(f.folders||{}).map(k=>`<button data-f="${esc(k)}" class="${k===FS.folder?"on":""}">${{FreedomOS:"🗂",Shared:"🤝",Phone:"📱",Pictures:"🎨"}[k]||"📁"} ${esc(k)}</button>`).join("");
+  $("fsTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ FS.folder = b.dataset.f; FS.path = ""; fsDrawInfo(); fsLoad(); });
+  $("fsWhere").textContent = (f.folders||{})[FS.folder] ? "on " + f.me : "";
+  let txt;
+  if (!peers.length) txt = "🔌 Not linked to your other PC yet - hit 🔗 Link PCs (on a PC).";
+  else if (st.busy) txt = `🔄 ${esc(st.now||"syncing...")} ${st.todo?`(${st.done}/${st.todo}${st.bytes_todo?" · "+fsSize(st.bytes)+" of "+fsSize(st.bytes_todo):""})`:""}`;
+  else if (!f.on) txt = `⏸ Linked to ${peers.map(p=>esc(p.name)).join(", ")} - syncing is OFF. Hit 🔗 Link PCs to preview, then Start.`;
+  else txt = `✅ Same files as ${peers.map(p=>esc(p.name)).join(", ")}${Object.keys(st.last||{}).length?" · last synced "+Object.values(st.last).join(", "):""}${(st.errors||[]).length?` · ⚠ ${st.errors.length} hiccup(s)`:""}`;
+  $("fsSyncTxt").innerHTML = txt;
+  $("fsBarW").style.display = st.busy && st.todo ? "" : "none";
+  $("fsBar").style.width = st.todo ? Math.round(100 * (st.bytes_todo ? st.bytes / st.bytes_todo : st.done / st.todo)) + "%" : "0%";
+  $("fsNow").disabled = !peers.length || st.busy; $("fsOnOff").style.display = peers.length ? "" : "none";
+  $("fsOnOff").textContent = f.on ? "⏸ Pause syncing" : "▶ Start syncing";
+  $("fsMyCode").value = f.pair || "(this PC isn't on Tailscale - turn Tailscale on and restart FreedomOS)";
+  $("fsPeers").innerHTML = peers.length ? "<b>Linked:</b> " + peers.map(p=>`${esc(p.name)} <button data-un="${esc(p.name)}" style="padding:0 6px">unlink</button>`).join(" ") : "";
+  $("fsPeers").querySelectorAll("[data-un]").forEach(b=>b.onclick=()=>{ if (confirm("Unlink " + b.dataset.un + "? Files stay where they are.")) fsAct({act:"unpair", name:b.dataset.un}); });
+}
+function fsDrawRows(){
+  const parts = FS.path ? FS.path.split("/") : [];
+  $("fsCrumbs").innerHTML = `<a data-p="">${esc(FS.folder)}</a>` + parts.map((p,i)=>` › <a data-p="${esc(parts.slice(0,i+1).join("/"))}">${esc(p)}</a>`).join("");
+  $("fsCrumbs").querySelectorAll("a").forEach(a=>a.onclick=()=>{ FS.path = a.dataset.p; fsLoad(); });
+  const rows = FS.rows;
+  $("fsRows").innerHTML = (FS.path ? `<div class="r" data-up="1"><span>⬆</span><span class="nm">..</span></div>` : "") + (rows.length ? rows.map((r,i)=>{ const rel = (FS.path ? FS.path + "/" : "") + r.name;
+    return `<div class="r" data-i="${i}">${!r.dir && FS_IMG.test(r.name) && r.size < 15e6 ? `<img class="thumb" loading="lazy" src="${fsUrl(rel,1)}" alt="">` : `<span>${fsIcon(r)}</span>`}
+      <span class="nm">${esc(r.name)}</span>${r.nosync?`<span class="ns" title="This one stays on this PC only">this PC only</span>`:""}
+      <span class="sz">${r.dir?"":fsSize(r.size)}</span><span class="dt">${fsDate(r.mtime)}</span>
+      ${r.dir?"":`<a href="${fsUrl(rel)}" download title="Download"><button>⬇</button></a>`}<button data-del="${i}" title="Move to todelete">🗑</button></div>`; }).join("")
+    : `<div class="sub" style="padding:14px">Empty. Drop files here, or hit ⬆ Upload${/Android|iPhone/i.test(navigator.userAgent)?" / 📷 Send photos":""}.</div>`);
+  $("fsRows").querySelectorAll(".r").forEach(el=>el.onclick=e=>{
+    if (e.target.closest("button,a")) { const d = e.target.closest("[data-del]"); if (d) { const r = rows[+d.dataset.del];
+        if (confirm(`Move "${r.name}" to todelete? (The other PC moves its copy there too.)`)) fsAct({act:"trash", folder:FS.folder, path:(FS.path?FS.path+"/":"")+r.name}).then(fsLoad); } return; }
+    if (el.dataset.up) { FS.path = FS.path.split("/").slice(0,-1).join("/"); fsLoad(); return; }
+    const r = rows[+el.dataset.i]; if (!r) return; const rel = (FS.path ? FS.path + "/" : "") + r.name;
+    if (r.dir) { FS.path = rel; fsLoad(); } else window.open(fsUrl(rel, 1), "_blank");
+  });
+}
+async function fsLoad(){
+  try { const r = await fetch(`/files/list?folder=${encodeURIComponent(FS.folder)}&path=${encodeURIComponent(FS.path)}`);
+    if (!r.ok) { FS.path = ""; FS.rows = []; } else { const d = await r.json(); FS.rows = d.rows; }
+  } catch(e) { FS.rows = []; }
+  fsDrawRows();
+}
+async function fsInfo(){ try { FS.info = await (await fetch("/files")).json(); fsDrawInfo(); } catch(e){} }
+async function fsAct(body){
+  const r = await fetch("/files/act", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)}); const d = await r.json();
+  if (d.files) { FS.info = d.files; fsDrawInfo(); } return d;
+}
+async function fsUpload(files, folder, path){
+  if (!files || !files.length) return; const fd = new FormData(); fd.append("folder", folder); fd.append("path", path);
+  let tot = 0; [...files].forEach(f=>{ fd.append("file", f, f.name); tot += f.size; });
+  $("fsMsg").textContent = `⬆ sending ${files.length} file(s), ${fsSize(tot)}...`;
+  try { const x = new XMLHttpRequest(); x.open("POST", "/files/put");
+    x.upload.onprogress = e => { if (e.lengthComputable) $("fsMsg").textContent = `⬆ ${Math.round(100*e.loaded/e.total)}% of ${fsSize(tot)}`; };
+    await new Promise((ok, bad)=>{ x.onload = ()=> x.status < 300 ? ok() : bad(new Error(x.status)); x.onerror = bad; x.send(fd); });
+    $("fsMsg").textContent = `✅ sent ${files.length} file(s) - they'll be on your other PC next sync`;
+    if (FS.folder === folder && FS.path === path) fsLoad();
+  } catch(e) { $("fsMsg").textContent = "⚠ upload failed"; }
+}
+$("fsUp").onclick = () => $("fsFile").click();
+$("fsFile").onchange = e => { fsUpload([...e.target.files], FS.folder, FS.path); e.target.value = ""; };
+$("fsPhotos").onclick = () => $("fsPhotoIn").click();
+$("fsPhotoIn").onchange = e => { const go = [...e.target.files]; FS.folder = "Phone"; FS.path = ""; fsDrawInfo(); fsUpload(go, "Phone", "").then(fsLoad); e.target.value = ""; };
+$("fsMk").onclick = async () => { const n = prompt("New folder name:"); if (n) { await fsAct({act:"mkdir", folder:FS.folder, path:FS.path, name:n}); fsLoad(); } };
+$("fsNow").onclick = () => fsAct({act:"now"});
+$("fsOnOff").onclick = () => fsAct({act: FS.info && FS.info.on ? "pause" : "start"});
+$("fsPairBtn").onclick = () => { const p = $("fsPair"); p.style.display = p.style.display === "flex" ? "none" : "flex"; };
+$("fsCopy").onclick = async () => { try { await navigator.clipboard.writeText($("fsMyCode").value); $("fsCopyMsg").textContent = "copied ✔"; } catch(e) { $("fsMyCode").select(); $("fsCopyMsg").textContent = "press Ctrl+C"; } };
+$("fsPairGo").onclick = async () => {
+  $("fsPairMsg").textContent = "knocking on the other PC's door...";
+  const d = await fsAct({act:"pair", code: $("fsTheirCode").value});
+  if (d.error) { $("fsPairMsg").textContent = "⚠ " + d.error; return; }
+  $("fsPairMsg").textContent = "✅ linked! Checking what would copy..."; $("fsTheirCode").value = "";
+  const p = await fsAct({act:"preview"}); fsShowPreview(p.preview || {});
+};
+function fsShowPreview(pv){
+  const rows = []; for (const [peer, fol] of Object.entries(pv)) { if (fol.error) { rows.push(`<tr><td colspan=4>⚠ ${esc(peer)}: ${esc(fol.error)}</td></tr>`); continue; }
+    for (const [k, v] of Object.entries(fol)) rows.push(`<tr><td>${esc(k)}</td><td>${v.here} here · ${v.there} on ${esc(peer)}</td><td>⬇ ${v.pull} file(s), ${v.pull_mb} MB</td><td>${v.conflict?"⚠ "+v.conflict+" both changed (keeps both)":""}</td></tr>`); }
+  $("fsPrev").innerHTML = `<b>What copies to THIS PC the first time:</b><table><tr><th>Folder</th><th>Files</th><th>Coming over</th><th></th></tr>${rows.join("")}</table>
+    <div class="sub" style="margin:6px 0">The other PC pulls what it's missing from here the same way. Nothing gets deleted the first time. Machine-only stuff (brain engine, logs, keys, todelete) never syncs.</div>
+    <button id="fsStart" class="grn">▶ Start syncing</button>`;
+  $("fsStart").onclick = () => { fsAct({act:"start"}); $("fsPrev").innerHTML = "✅ Syncing's ON. It checks in every 2 minutes. Hit ▶ Start syncing on the other PC too."; };
+}
+// drag + drop onto the window
+["dragenter","dragover"].forEach(t=>$("fsWin").addEventListener(t, e=>{ if ([...(e.dataTransfer||{}).types||[]].includes("Files")) { e.preventDefault(); $("fsDrop").style.display = "flex"; } }));
+["dragleave","drop"].forEach(t=>$("fsWin").addEventListener(t, e=>{ if (t === "dragleave" && e.relatedTarget && $("fsWin").contains(e.relatedTarget)) return; $("fsDrop").style.display = "none"; }));
+$("fsWin").addEventListener("drop", e=>{ e.preventDefault(); fsUpload([...e.dataTransfer.files], FS.folder, FS.path); });
+function fsShow(on){ $("fsWin").classList.toggle("open", on); if (on) { fsInfo().then(()=>{ if (FS.info && !FS.info.peers.length && !/Android|iPhone/i.test(navigator.userAgent)) $("fsPair").style.display = "flex"; }); fsLoad(); } }
+$("fsBtn").onclick = () => fsShow(!$("fsWin").classList.contains("open"));
+$("fsClose").onclick = () => fsShow(false);
+addEventListener("keydown", e => { const typing = /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+  if ((e.key==="f"||e.key==="F") && !typing && !e.ctrlKey && !e.altKey && !e.metaKey && !$("ccWin").classList.contains("open")) { e.preventDefault(); fsShow(true); }
+  if (e.key==="Escape" && $("fsWin").classList.contains("open")) fsShow(false); });
+// 🖥 maximize = borderless fullscreen. Esc = the min/max/close bar comes back (stays that way till you un-maximize).
+const FSX = { armed: true, wantClick: false };
+const isMax = () => outerWidth >= screen.availWidth - 10 && outerHeight >= screen.availHeight - 10;
+const NATIVE_APP = !!(window.chrome && chrome.webview);       // the FreedomOS app does its own full screen - leave it be
+function goFull(){ if (NATIVE_APP || document.fullscreenElement || !FSX.armed) return;
+  FSX.armed = false; FSX.wantClick = false; $("fsHint").style.display = "none";
+  document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(()=>{ FSX.armed = true; }); }
+addEventListener("keydown", e => { if (e.key === "F13") { e.preventDefault(); if (isMax()) goFull(); } });
+addEventListener("resize", () => {
+  if (NATIVE_APP || document.fullscreenElement) return;
+  if (!isMax()) { FSX.armed = true; FSX.wantClick = false; $("fsHint").style.display = "none"; return; }
+  if (FSX.armed) setTimeout(() => { if (FSX.armed && isMax() && !document.fullscreenElement) { FSX.wantClick = true; $("fsHint").style.display = "block"; } }, 1200);
+});
+addEventListener("pointerdown", () => { if (FSX.wantClick) goFull(); }, true);
+// 🔄 auto-update: new files from Claude -> refresh by itself (waits if you're halfway through typing something)
+function softReload(){
+  const el = document.activeElement, typing = el && /TEXTAREA|INPUT/.test(el.tagName) && el.value;
+  if (typing) return setTimeout(softReload, 5000);
+  location.reload();
+}
+function updatingBack(){
+  $("bye").firstElementChild.innerHTML = `🔄 New update from Claude!<br><span class="sub" id="byeWhy">Updating the crew - back in a few seconds</span>`; $("bye").style.display="flex";
+  $("dot").classList.remove("on"); $("conn").textContent = "Updating...";
+  let n = 0; const t = setInterval(async ()=>{ n++;
+    try { const r = await fetch("/health", {cache:"no-store"}); if (r.ok) { clearInterval(t); setTimeout(softReload, 1500); } } catch(e){}
+    if (n > 90) { clearInterval(t); $("byeWhy").textContent = "Update's taking a while - double-click FreedomOS.bat if it doesn't come back."; } }, 2000);
+}
+function connect(){
+  const es = new EventSource("/events");
+  es.onopen = ()=>{ $("dot").classList.add("on"); $("conn").textContent = "Connected."; };
+  es.onerror = ()=>{ $("dot").classList.remove("on"); $("conn").textContent = "Lost the boss... retrying"; };
+  es.onmessage = e=>{
+    const ev = JSON.parse(e.data);
+    crew.event(ev);
+    if (ev.type==="askcheck" && last && ev.q.toLowerCase()===last.q.toLowerCase()) {
+      if (ev.stage==="start") drawCrew([], null, true);
+      else if (ev.stage==="vote") drawCrew([...crewVotes.filter(v=>v.who!==ev.vote.who), ev.vote], null, true);
+      else if (ev.stage==="done") { last.crew = ev.check; if (ev.check.sure==="high") { last.sure = "high"; pill(); }
+        drawCrew(ev.check.votes, ev.check);
+        const r = recent.find(x=>x.q.toLowerCase()===ev.q.toLowerCase()); if (r) { r.crew = ev.check; if (ev.check.sure==="high") r.sure="high"; } } }
+    if (ev.type==="pixel") setPixel(ev.pixel);
+    if (ev.type==="pixlite") { setLite(ev.pixlite); if (ev.made) liteRefresh(); }
+    if (ev.type==="snapshot" && ev.pixlite) setLite(ev.pixlite);
+    if (ev.type==="brain") { setBrain(ev.brain); $("model").textContent = ev.model; }
+    if (ev.type==="brainrace") drawRace(ev.race);
+    if (ev.type==="cc" || ev.type==="cc_live") ccOnEvent(ev);
+    if (ev.type==="music") drawMusic(ev.music);
+    if (ev.type==="lyrics") setLyr(ev.lyrics);
+    if (ev.type==="discord") drawDiscord(ev.n);
+    if (ev.type==="files") { FS.info = ev.files; if ($("fsWin").classList.contains("open")) fsDrawInfo(); }
+    if (ev.type==="snapshot" && ev.cc) { CC.list = ev.cc.chats || []; CC.installed = ev.cc.installed; }
+    if (ev.type==="snapshot" && ev.boot) { if (window.F35_BOOT && ev.boot !== window.F35_BOOT) softReload(); window.F35_BOOT = ev.boot; }
+    if (ev.type==="snapshot" && ev.cpu) setCpu(ev.cpu);
+    if (ev.type==="snapshot"){ setPixel(ev.pixel); setBrain(ev.brain); $("model").textContent = ev.model; if (ev.version) $("ver").textContent="v"+ev.version; setEngine(ev.engine); setGpu(ev.gpu); ev.jobs.forEach(j=>jobs[j.id]=j); renderJobs(); }
+    else if (ev.type==="job"){ jobs[ev.job.id]=ev.job; renderJobs(); }
+    else if (ev.type==="gpu") setGpu(ev.gpu);
+    else if (ev.type==="cpu") setCpu(ev.cpu);
+    else if (ev.type==="engine") setEngine(ev.engine);
+    else if (ev.type==="bye" && ev.restart){ es.close(); updatingBack(); }
+    else if (ev.type==="bye"){ $("byeWhy").textContent = ev.reason; $("bye").style.display="flex"; es.close(); $("dot").classList.remove("on"); $("conn").textContent="FreedomOS server is off."; }
+    else if (ev.type==="reload") softReload();
+  };
+}
+const MUS = { s: null };
+function musicCtl(what){ fetch("/music/ctl", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ do: what }) })
+  .then(r=>r.json()).then(d=>{ if (d.music) drawMusic(d.music); else if (d.where==="phone") window.open("https://music.youtube.com/", "_blank"); }).catch(()=>{}); }
+const fmtT = s => { s = Math.floor(s || 0); return s ? `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}` : "0:00"; };
+function drawMusic(m){ MUS.s = m = m || MUS.s; if (!m) return;
+  $("mTitle").textContent = m.title || (m.running ? "Nothing playing" : "Not open");
+  $("mArtist").textContent = m.artist || (m.running ? "Pick a song in WiMix" : "Hit Open WiMix");
+  if (m.art) $("mArt").src = m.art; $("mArt").style.visibility = m.art ? "visible" : "hidden";
+  $("mBar").style.width = (m.d ? 100 * m.t / m.d : 0) + "%"; $("mTime").textContent = m.d ? `${fmtT(m.t)} / ${fmtT(m.d)}` : "";
+  $("mPlay").textContent = m.playing ? "⏸" : "▶"; $("mLike").style.opacity = m.liked ? 1 : .55;
+  $("mOpen").title = m.running ? "Show WiMix" : "Open WiMix"; $("mOpen").dataset.m = m.running ? "show" : "open";
+  $("mVideo").textContent = m.video ? "🎬 Auto video: ON" : "🎬 Auto video: off";
+  $("mKara").textContent = m.karaoke ? "🎤 Karaoke on wallpaper: ON" : "🎤 Karaoke on wallpaper: off";
+  // 🎧 now-playing card on the desktop (always, while music's on)
+  $("npCard").classList.toggle("show", !!(m.running && m.title));
+  if (m.title) { $("npT").textContent = m.title; $("npA").textContent = m.artist || ""; if (m.art && $("npArt").src !== m.art) $("npArt").src = m.art; $("npP").textContent = m.playing ? "⏸" : "▶"; }
+  drawLyr();
+  $("mMini").textContent = m.mini ? "Big player" : "Mini player"; $("mMini").style.display = (window.chrome && chrome.webview) ? "none" : ""; $("mLook").textContent = m.look ? "YouTube look" : "Shop look";
+  const chip = $("sMusic"); chip.style.display = m.running && m.title ? "" : "none";
+  chip.innerHTML = m.title ? `🎧 <span style="max-width:180px;display:inline-block;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom">${m.title.replace(/</g,"&lt;")}</span> <a data-mc="prev">⏮</a> <a data-mc="play">${m.playing ? "⏸" : "▶"}</a> <a data-mc="next">⏭</a>` : "";
+}
+$("dcOvlBtn").onclick = () => { if (window.chrome && chrome.webview) chrome.webview.postMessage("ovl:toggle"); };
+$("discordBtn").onclick = () => { if (window.chrome && chrome.webview) chrome.webview.postMessage("app:discord"); else window.open("https://discord.com/app", "_blank"); };
+function drawDiscord(n){ $("discordBtn").textContent = n > 0 ? "👾" + n : "👾"; $("discordBtn").title = n > 0 ? `Discord - ${n} new` : "Discord"; }
+fetch("/discord/ping").then(r => r.json()).then(d => drawDiscord(d.n)).catch(() => {});
+$("musicBtn").addEventListener("click", () => { if (!(MUS.s && MUS.s.running)) musicCtl("start"); });
+$("popMusic").addEventListener("click", e => { const b = e.target.closest("[data-m]"); if (b) musicCtl(b.dataset.m); });
+$("sMusic").addEventListener("click", e => { const a = e.target.closest("[data-mc]"); if (a) { e.stopPropagation(); musicCtl(a.dataset.mc); } else document.querySelector('[data-pop="popMusic"]').click(); });
+// 🎤 lyrics: the line playing now lights up (karaoke) - in the 🎧 panel, on the card, and big on the wallpaper if you want
+const LYR = { d: null, key: "", built: "", at: -1, tick: performance.now() };
+function setLyr(d){ LYR.d = d; LYR.built = ""; LYR.at = -1; drawLyr(); }
+function lyrOff(){ const d = LYR.d, m = MUS.s; if (!d || !m) return 0;
+  try { const v = localStorage.getItem("f35_lyr_" + d.key); if (v !== null) return +v; } catch (e) {}
+  return d.dur && m.d && m.d - d.dur > 4 ? -(m.d - d.dur) * .8 : 0; }      // the video version has an intro? start the lyrics later
+function lyrNudge(sec){ const d = LYR.d; if (!d) return; const v = Math.round((lyrOff() + sec) * 10) / 10;
+  try { localStorage.setItem("f35_lyr_" + d.key, v); } catch (e) {} $("lyrOff").textContent = (v > 0 ? "+" : "") + v.toFixed(1) + "s"; LYR.at = -2; drawLyr(); }
+function curLine(){ const L = LYR.d && LYR.d.lines, m = MUS.s; if (!L || !L.length || !m) return -1;
+  const t = (m.t || 0) + (m.playing ? (performance.now() - LYR.tick) / 1000 : 0) + .25 + lyrOff(); let i = -1;
+  for (let k = 0; k < L.length; k++) { if (L[k][0] <= t) i = k; else break; } return i; }
+function drawLyr(){
+  const m = MUS.s, d = LYR.d, box = $("mLyr");
+  const mine = d && m && d.key === `${m.title}|${m.artist}`;
+  $("lyrBar").style.display = mine && d.synced ? "" : "none";
+  if (mine && LYR.built !== d.key) { const v = lyrOff(); $("lyrOff").textContent = (v > 0 ? "+" : "") + v.toFixed(1) + "s"; }
+  if (!mine) { box.innerHTML = ""; $("npL").textContent = ""; $("karaoke").classList.remove("show"); return; }
+  if (LYR.built !== d.key) { LYR.built = d.key; LYR.at = -1;
+    box.innerHTML = d.synced ? d.lines.map(l => `<div>${esc(l[1] || "♪")}</div>`).join("") : (d.plain ? `<div class="on" style="white-space:pre-wrap;font-weight:400">${esc(d.plain)}</div>` : ""); }
+  const i = d.synced ? curLine() : -1;
+  if (d.synced && i !== LYR.at) { LYR.at = i; const rows = box.children;
+    for (let k = 0; k < rows.length; k++) rows[k].classList.toggle("on", k === i);
+    if (rows[i]) box.scrollTop = rows[i].offsetTop - box.offsetTop - box.clientHeight / 2 + 12; }
+  const L = d.lines || [], line = i >= 0 ? (L[i][1] || "♪") : "";
+  $("npL").textContent = line;
+  const k = $("karaoke"), on = !!(m.karaoke && d.synced && m.playing);
+  k.classList.toggle("show", on);
+  if (on) { k.querySelector(".p").textContent = i > 0 ? L[i-1][1] : ""; k.querySelector(".c").textContent = line || "♪"; k.querySelector(".n").textContent = L[i+1] ? L[i+1][1] : ""; }
+}
+$("npCard").addEventListener("click", e => { const a = e.target.closest("[data-mc]"); if (a) musicCtl(a.dataset.mc); else document.querySelector('[data-pop="popMusic"]').click(); });
+const _drawMusicRaw = drawMusic;
+drawMusic = function(m){ if (m) LYR.tick = performance.now(); _drawMusicRaw(m); };
+setInterval(()=>{ if (MUS.s && MUS.s.playing && MUS.s.d) { MUS.s.t = Math.min(MUS.s.d, (MUS.s.t || 0) + 1); LYR.tick = performance.now(); _drawMusicRaw(); } }, 1000);   // tick the clock between updates
+setInterval(()=>{ if (MUS.s && MUS.s.playing && LYR.d && LYR.d.synced) drawLyr(); }, 200);
+fetch("/music/lyrics").then(r=>r.json()).then(setLyr).catch(()=>{});
+fetch("/music/state").then(r=>r.json()).then(drawMusic).catch(()=>{});
+// ---------- 🔎 F35 Web ----------
+const WEB = { hist: [], last: null };
+const isPC = () => /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+try { $("webBrain").checked = localStorage.getItem("f35_web_brain") !== "0"; } catch (e) { $("webBrain").checked = true; }
+$("webBrain").onchange = () => { try { localStorage.setItem("f35_web_brain", $("webBrain").checked ? "1" : "0"); } catch (e) {} };
+function webShow(on){ $("webWin").classList.toggle("open", on); if (on) { $("webQ").focus(); kbShow($("webQ")); } }
+function webView(v){ $("webAns").style.display = v === "list" && WEB.last && WEB.last.answer ? "block" : "none"; $("webList").style.display = v === "list" ? "" : "none";
+  $("webRead").style.display = v === "read" ? "" : "none"; $("webBack").style.display = WEB.hist.length ? "" : "none"; $("webBody").scrollTop = 0; }
+function webBrowse(url){ if (isPC()) fetch("/web/browse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: url || "" }) }); else window.open(url || "https://duckduckgo.com/", "_blank"); }
+async function webSearch(q, push){
+  q = (q || $("webQ").value).trim(); if (!q) return;
+  if (/^(https?:\/\/|www\.)\S+$/i.test(q)) return webRead(q, true);
+  if (push !== false && WEB.last) WEB.hist.push({ kind: "list", data: WEB.last });
+  const brain = $("webBrain").checked;
+  $("webList").innerHTML = `<div class="sub" style="padding:10px">🔎 searchin'${brain ? " + the brain's reading the top pages (few seconds)" : ""}...</div>`; WEB.last = null; webView("list");
+  let d; try { d = await (await fetch("/web/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, brain }) })).json(); } catch (e) { d = { results: [], answer_note: "couldn't reach FreedomOS" }; }
+  WEB.last = d; drawWeb(d);
+}
+function drawWeb(d){
+  const R = d.results || [];
+  $("webAns").innerHTML = d.answer ? `<div class="sub" style="margin-bottom:4px">🧠 Straight answer${d.by ? ` <span style="opacity:.6">(${esc(d.by)}'s brain)</span>` : ""}</div>` +
+    esc(d.answer).replace(/\[(\d+)\]/g, (m, n) => R[n - 1] ? `<span class="src" data-src="${n - 1}" title="${esc(R[n - 1].site)}">[${n}]</span>` : m) : "";
+  $("webList").innerHTML = (d.answer_note ? `<div class="sub" style="padding:6px">${esc(d.answer_note)}</div>` : "") + (R.length ? R.map((r, i) => `<div class="wr">
+    <div class="tt" data-read="${i}">${i + 1}. ${esc(r.title)}</div><div class="st">${esc(r.site)}</div><div class="sn">${esc(r.snippet)}</div>
+    <div class="bt"><button data-read="${i}">📖 Read clean</button><button data-open="${i}">🌐 Open in WiBro</button></div></div>`).join("") : `<div class="sub" style="padding:10px">Nothing came back. Try different words.</div>`);
+  webView("list");
+}
+async function webRead(url, push){
+  if (push !== false) WEB.hist.push(WEB.cur ? { kind: "read", data: WEB.cur } : { kind: "list", data: WEB.last });
+  $("webRead").innerHTML = `<div class="sub">📖 loading it clean...</div>`; webView("read");
+  let d; try { d = await (await fetch("/web/read?url=" + encodeURIComponent(url))).json(); } catch (e) { d = { error: "couldn't reach FreedomOS" }; }
+  WEB.cur = d;
+  $("webRead").innerHTML = d.error ? `<p>${esc(d.error)}</p><p><button id="webTryReal">🌐 Open it in WiBro instead</button></p>` :
+    `<div class="sub">${esc(d.site)} · <a data-real="1">🌐 open the real page</a></div><h2 style="margin:6px 0 10px">${esc(d.title)}</h2>` + d.html;     // d.html is cleaned on the PC: safe tags only, no scripts
+  const tr = $("webTryReal"); if (tr) tr.onclick = () => webBrowse(url);
+  webView("read");
+}
+$("webBody").addEventListener("click", e => {
+  const t = e.target.closest("[data-read],[data-open],[data-src],[data-real],a[href]"); if (!t) return;
+  const R = (WEB.last && WEB.last.results) || [];
+  if (t.dataset.read != null) return webRead(R[+t.dataset.read].url);
+  if (t.dataset.open != null) return webBrowse(R[+t.dataset.open].url);
+  if (t.dataset.src != null) return webRead(R[+t.dataset.src].url);
+  if (t.dataset.real) return webBrowse(WEB.cur && WEB.cur.url);
+  if (t.matches("a[href]")) { e.preventDefault(); const u = t.getAttribute("href"); if (/\.(pdf|zip|exe|mp4)(\?|$)/i.test(u)) webBrowse(u); else webRead(u); }
+});
+$("webBack").onclick = () => { const h = WEB.hist.pop(); if (!h) return; if (h.kind === "list") { WEB.cur = null; WEB.last = h.data; if (h.data) drawWeb(h.data); else webView("list"); }
+  else { WEB.cur = h.data; webRead(h.data.url, false); } };
+$("webGo").onclick = () => webSearch(); $("webQ").addEventListener("keydown", e => { if (e.key === "Enter") webSearch(); });
+$("webBrowse").onclick = () => webBrowse(""); $("browserBtn").onclick = () => webBrowse("");
+addEventListener("keydown", e=>{ if ((e.key==="b"||e.key==="B") && !/TEXTAREA|INPUT/.test(document.activeElement.tagName) && !e.ctrlKey && !e.altKey) webBrowse(""); }); $("webX").onclick = () => webShow(false); $("webBtn").onclick = () => webShow(!$("webWin").classList.contains("open"));
+$("webWin").addEventListener("click", e => { if (e.target.id === "webWin") webShow(false); });
+addEventListener("keydown", e=>{ if (e.key === "Escape" && $("webWin").classList.contains("open")) webShow(false);
+  if ((e.key==="g"||e.key==="G") && !/TEXTAREA|INPUT/.test(document.activeElement.tagName) && !e.ctrlKey && !e.altKey) { e.preventDefault(); webShow(true); } });
+function openMusic(){ musicCtl(MUS.s && MUS.s.running ? "show" : "open"); }
+addEventListener("keydown", e=>{ if ((e.key==="y"||e.key==="Y") && !/TEXTAREA|INPUT/.test(document.activeElement.tagName) && !e.ctrlKey && !e.altKey) openMusic(); });
+let compactWas = null, bigSize = null;
+function setCompact(on){
+  if (on === compactWas) return; compactWas = on;
+  document.body.classList.toggle("compact", on);
+  if (on) {
+    if (document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+    bigSize = { w: outerWidth, h: outerHeight, x: screenX, y: screenY };
+  } else {
+    setTimeout(()=>dispatchEvent(new Event("resize")), 200);
+  }
+  if (typeof drawWall === "function") drawWall();
+
+}
+// ---------- 👥 crew panel / 🧠 brain switch / 💬 chats panel ----------
+(function(){
+  // 👥 crew panel: who's on the team + crew board on/off
+  const drawCrewBtns = () => { $("crewSw").textContent = crew.asleep ? "👥 Show the crew board" : "🖼 Hide the crew board (wallpaper only)"; $("crewList").innerHTML = crew.listHTML(); };
+  $("crewSw").onclick = () => { $("sleepBtn").click(); setTimeout(drawCrewBtns, 50); };
+  setInterval(drawCrewBtns, 1500); drawCrewBtns();
+
+  // brain switch: click = on/off, hover = these options
+  let BSW = true;
+  const drawSw = () => {
+    $("brainBtn").classList.toggle("off", !BSW);
+    $("brainBtn").textContent = BSW ? "🧠" : "😴";
+    $("brainBtn").title = BSW ? "🧠 Brain is ON - click to switch it off · hover for options" : "🧠 Brain is OFF - click to switch it on · hover for options";
+    $("brainSw2").textContent = BSW ? "🟢 ON - switch off" : "⚫ OFF - switch on";
+    $("brainSwNote").textContent = BSW ? "Stays loaded - answers come back fast."
+                                      : "Unloaded to keep the PC cool. A question or a job wakes it up, then it switches back off.";
+  };
+  const setSw = on => fetch("/brain/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }) })
+    .then(r => r.json()).then(d => { BSW = d.on; drawSw(); }).catch(() => {});
+  fetch("/brain/switch").then(r => r.json()).then(d => {
+    BSW = d.on; drawSw();
+    let seen = ""; try { seen = localStorage.getItem("f35_boot") || ""; } catch (e) {}
+    if (d.boot && d.boot !== seen) {                      // FreedomOS just started up: wallpaper only
+      try { localStorage.setItem("f35_boot", d.boot); } catch (e) {}
+      if (!crew.asleep) { crew.sleep(true, "boot"); drawSleep(); }
+    }
+  }).catch(() => {});
+  setInterval(() => fetch("/brain/switch").then(r => r.json()).then(d => { if (d.on !== BSW) { BSW = d.on; drawSw(); } }).catch(() => {}), 5000);
+  $("brainBtn").onclick = e => { e.stopPropagation(); setSw(!BSW); };     // click flips it (hover still shows the options)
+  $("brainSw2").onclick = () => setSw(!BSW);
+  window.f35BrainToggle = () => setSw(!BSW);
+
+  // chats: quick ask / claude / web, each on its own
+  let ct = "shop"; try { ct = localStorage.getItem("f35_chat_tab") || ct; } catch (e) {}
+  const askHome = { parent: $("ask").parentNode, next: $("ask").nextSibling };
+  const putAsk = inChats => {
+    const a = $("ask");
+    if (inChats && a.parentNode !== $("ctShop")) { $("ctShop").appendChild(a); a.classList.add("open"); a.classList.remove("mini"); }
+    else if (!inChats && a.parentNode === $("ctShop")) { askHome.parent.insertBefore(a, askHome.next); if (!document.body.classList.contains("compact")) a.classList.add("mini"); }
+  };
+  const drawCt = () => {
+    document.querySelectorAll("#chatTabs button").forEach(b => b.classList.toggle("on", b.dataset.ct === ct));
+    document.querySelectorAll("#popChats .ct").forEach(d => d.classList.toggle("on", d.dataset.ct === ct));
+    if (ct === "claude") drawCcMini();
+  };
+  const drawCcMini = () => {
+    ccLoad().then(() => {
+      $("ctCcList").innerHTML = CC.list.length ? CC.list.map(c => `<div class="it" data-id="${ccEsc(c.id)}"><span>${c.pinned ? "📌 " : ""}${c.busy ? "⏳ " : ""}${ccEsc(c.title)}</span><span class="sub">open ›</span></div>`).join("")
+        : `<div class="sub" style="padding:6px">No Claude chats yet.</div>`;
+      $("ctCcList").querySelectorAll(".it").forEach(el => el.onclick = () => { pinned = ""; peek = ""; drawPops(); ccShow(true); ccOpen(el.dataset.id); });
+    });
+  };
+  document.querySelectorAll("#chatTabs button").forEach(b => b.onclick = e => { e.stopPropagation(); ct = b.dataset.ct; try { localStorage.setItem("f35_chat_tab", ct); } catch (er) {} drawCt(); drawPops(); });
+  $("ctCcNew").onclick = () => { pinned = ""; peek = ""; drawPops(); ccShow(true); $("ccNew").click(); };
+  $("ctCcOpen").onclick = () => { pinned = ""; peek = ""; drawPops(); ccShow(true); };
+  const goWeb = () => { const q = $("ctWebQ").value.trim(); if (!q) return; pinned = ""; peek = ""; drawPops(); webShow(true); $("webQ").value = q; webSearch(q); };
+  $("ctWebGo").onclick = goWeb; $("ctWebQ").addEventListener("keydown", e => { if (e.key === "Enter") goWeb(); });
+  $("ctWebBro").onclick = () => webBrowse("");
+  window.f35OpenShop = () => { ct = "shop"; pinned = "popChats"; peek = ""; drawPops(); setTimeout(() => { $("askQ").focus(); kbShow($("askQ")); }, 60); };
+  // the ⚡ ask box lives in the Chats panel while it's open on ⚡ Ask, and goes back home when it closes
+  const oldDraw = drawPops;
+  drawPops = function(){ oldDraw(); const open = openPop() === "popChats"; putAsk(open && ct === "shop"); if (open) drawCt(); };
+  drawCt();
+})();
+
+// ---------- 🖼 live web wallpapers behind the Home screen ----------
+const WALLS = [["off", "🌑 No wallpaper"], ["abyss-pets", "Abyss Pets"], ["abyss", "Abyss"], ["aurora-lake", "Aurora Lake"], ["baldwin-crusade", "Baldwin's Crusade"], ["event-horizon", "Event Horizon"], ["fractal-dive", "Fractal Dive"], ["montgisard-battle", "Montgisard: The Battle"], ["montgisard-charge", "The Charge of Montgisard"], ["montgisard-victory", "Jerusalem Holds"], ["neon-galaxy", "Neon Galaxy"], ["neon-highway", "Neon Highway"], ["prairie-fireflies", "Prairie Fireflies"], ["rain-city", "Midnight Rain City"]];
+let wallK = "aurora-lake";
+try { wallK = localStorage.getItem("f35_wall") || wallK; } catch (e) {}
+$("wallPick").innerHTML = WALLS.map(([k, t]) => `<option value="${k}">${k === "off" ? t : "🖼 " + esc(t)}</option>`).join("");
+$("wallPick").value = wallK;
+$("wallHome").appendChild($("wallPick"));
+$("wallParkOn").onclick = () => { pinned = ""; peek = ""; drawPops(); crew.sleep(false, "button"); drawSleep(); };
+const tellWall = () => { if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) fetch("/music/wall", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wall: wallK }) }).catch(()=>{}); };
+$("wallPick").onchange = e => { wallK = e.target.value; try { localStorage.setItem("f35_wall", wallK); } catch (er) {} drawWall(); tellWall(); };
+setTimeout(tellWall, 1500);
+function drawWall(){
+  const on = wallK !== "off";
+  document.body.classList.toggle("walls", on);
+  const f = $("wallBg"), want = on ? ("/widget/walls/" + wallK + ".html") : "";
+  if ((f.getAttribute("src") || "") !== want) { if (want) f.src = want; else f.removeAttribute("src"); }
+}
+$("napWake").onclick = ()=>{ crew.sleep(false, "button"); drawSleep(); };
+function drawSleep(){ const s = crew.asleep; setCompact(s); $("sleepBtn").title = s ? "Crew board is hidden - click to show it (Z key)" : "Hide the crew board (Z key)"; }
+$("sleepBtn").onclick = ()=>{ crew.sleep(!crew.asleep, "button"); drawSleep(); };
+addEventListener("keydown", e=>{ if ((e.key==="z"||e.key==="Z") && !/TEXTAREA|INPUT/.test(document.activeElement.tagName) && !e.ctrlKey && !e.altKey) { crew.sleep(!crew.asleep, "key"); drawSleep(); } });
+setInterval(drawSleep, 1500); setTimeout(drawSleep, 0);
+// ---------- 🖌 Pixel Shop Lite (pictures right on the laptop) ----------
+let LITE = null;
+function setLite(L, pics){
+  if (!L) return; LITE = L; $("lite").style.display = "block";
+  const busy = L.status === "setting up" || L.status === "making";
+  $("liteStat").textContent = L.status === "setting up" ? `⬇ ${L.detail || "setting up..."}` : L.status === "making" ? `🔨 ${L.detail}` :
+    L.status === "error" ? `⚠ ${L.detail}` : L.installed ? "🟢 ready - type what you want and hit Make it" : "Not set up yet. One click, one download, done.";
+  $("liteBar").style.display = L.status === "setting up" ? "block" : "none"; $("liteBarI").style.width = (L.pct||0) + "%";
+  $("liteSetup").style.display = !L.installed && L.status !== "setting up" ? "block" : "none";
+  $("liteMake").style.display = L.installed ? "block" : "none"; $("liteGo").disabled = busy;
+  $("liteStyle").innerHTML = (L.my_style||[]).length ? `🎨 Your style is baked in: <b>${L.my_style.map(esc).join(", ")}</b>` :
+    `🎨 No style drawings yet - drop yours in <b>${esc(L.my_style_folder||"my style")}</b> and it's used on every picture.`;
+  if (!$("liteLook").options.length) $("liteLook").innerHTML = Object.entries(L.looks||{}).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");
+  if (pics) $("liteGal").innerHTML = pics.length ? pics.map(p=>`<img loading="lazy" src="/pixlite/img/${encodeURIComponent(p.name)}" title="${esc(p.name)} - ${esc(p.when)}" data-n="${esc(p.name)}">`).join("")
+    : `<span class="sub">No pictures yet.</span>`;
+  $("liteGal").querySelectorAll("img").forEach(im=>im.onclick=()=>{ $("mTitle").textContent = im.dataset.n;
+    $("mBody").innerHTML = `<img src="${im.src}" style="width:100%;image-rendering:pixelated;border-radius:8px"><p class="sub">Saved in ${esc(LITE.folder)}</p>`; $("modal").style.display="flex"; });
+}
+function liteRefresh(){ fetch("/pixlite").then(r=>r.ok?r.json():null).then(d=>{ if (d) setLite(d, d.pictures); }).catch(()=>{}); }
+$("liteSetupBtn").onclick = ()=>{ fetch("/pixlite/setup",{method:"POST"}).then(r=>r.json()).then(d=>{ if (d.error) $("liteStat").textContent = "⚠ " + d.error; }); };
+$("liteOpen").onclick = ()=>{ fetch("/pixlite/open",{method:"POST"}).then(r=>r.json()).then(d=>{ if (d.error) $("liteStat").textContent = "⚠ " + d.error; }).catch(()=>{}); };
+// 🖼 drag + drop reference pictures (shrunk to 1024px before sending)
+let LITE_REFS = [];
+function liteDrawRefs(){
+  $("liteRefs").innerHTML = LITE_REFS.map((u,i)=>`<div><img src="${u}" alt="reference ${i+1}"><button data-x="${i}" title="Remove">✕</button></div>`).join("");
+  $("liteRefs").querySelectorAll("[data-x]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); LITE_REFS.splice(+b.dataset.x,1); liteDrawRefs(); });
+  $("liteKeepL").style.display = LITE_REFS.length ? "flex" : "none";
+}
+function liteAddFiles(files){
+  [...files].filter(f=>f.type.startsWith("image/")).slice(0, 4 - LITE_REFS.length).forEach(f=>{
+    const r = new FileReader(); r.onload = () => { const im = new Image(); im.onload = () => {
+      const k = Math.min(1, 1024 / Math.max(im.width, im.height)), cv = document.createElement("canvas");
+      cv.width = Math.round(im.width*k); cv.height = Math.round(im.height*k); cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+      if (LITE_REFS.length < 4) { LITE_REFS.push(cv.toDataURL("image/png")); liteDrawRefs(); } }; im.src = r.result; }; r.readAsDataURL(f); });
+}
+$("liteDrop").onclick = () => $("liteRefIn").click();
+$("liteRefIn").onchange = e => { liteAddFiles(e.target.files); e.target.value = ""; };
+["dragenter","dragover"].forEach(t=>$("lite").addEventListener(t, e=>{ if ([...(e.dataTransfer||{}).types||[]].includes("Files")) { e.preventDefault(); $("liteDrop").classList.add("over"); } }));
+["dragleave","drop"].forEach(t=>$("lite").addEventListener(t, e=>{ if (t==="dragleave" && e.relatedTarget && $("lite").contains(e.relatedTarget)) return; $("liteDrop").classList.remove("over"); }));
+$("lite").addEventListener("drop", e=>{ e.preventDefault(); liteAddFiles(e.dataTransfer.files); });
+$("litePrompt").addEventListener("paste", e=>{ const fs = [...(e.clipboardData||{}).items||[]].filter(i=>i.type.startsWith("image/")).map(i=>i.getAsFile()); if (fs.length) { e.preventDefault(); liteAddFiles(fs); } });
+$("liteGo").onclick = async ()=>{
+  const prompt = $("litePrompt").value.trim(); if (!prompt) return;
+  $("liteGo").disabled = true; $("liteStat").textContent = "🔨 Making it... (about a minute without an NVIDIA card)";
+  try { const r = await fetch("/pixlite/make",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt, look:$("liteLook").value, match:$("liteMatch").checked, refs: LITE_REFS, keep_style: $("liteKeep").checked})});
+    const d = await r.json(); $("liteStat").textContent = d.error ? "⚠ " + d.error : `✔ Done in ${d.secs}s - saved as ${d.name}`; }
+  catch(e) { $("liteStat").textContent = "⚠ couldn't reach the boss"; }
+  $("liteGo").disabled = false; liteRefresh();
+};
+liteRefresh();
+connect();
+if (PHONE()) { ask$.classList.remove("mini"); ask$.classList.add("open"); }
+tuckSoon(3000);
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden && !$("dot").classList.contains("on")) location.reload(); });
+</script>
+</body>
+</html>

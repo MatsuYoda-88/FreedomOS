@@ -1,0 +1,89 @@
+{
+  "version": "1.0.0",
+  "boss_name": "Atlas",
+  "checker_name": "Sentry",
+  "workers": [
+    "Nova",
+    "Bolt",
+    "Echo",
+    "Sage",
+    "Rook"
+  ],
+  "skins": {},
+  "bench": [],
+  "keepers": [],
+  "port": 7777,
+  "remote_watch": true,
+  "engine_port": 8080,
+  "threads": 6,
+  "extra_engine_args": [],
+  "review": true,
+  "ai_talk": false,
+  "ai_improv": false,
+  "max_redo": 1,
+  "allowed_folders": [
+    "%USERPROFILE%\\Documents\\FreedomOS",
+    "%USERPROFILE%\\Desktop",
+    "%USERPROFILE%\\Downloads"
+  ],
+  "max_subtasks": 9,
+  "max_files_per_subtask": 4,
+  "max_file_chars": 40000,
+  "idle_shutdown_minutes": 20,
+  "shop_hours": "",
+  "no_nvidia": {
+    "context_total": 32768,
+    "parallel": 3,
+    "threads": 8
+  },
+  "brain": "small",
+  "brains": {
+    "small": {
+      "model_hf": "mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF:Q4_K_M",
+      "model_label": "DeepSeek-V4-Pro Qwen3.5 9B Heretic",
+      "model_download_gb": 5.6,
+      "context_total": 65536,
+      "parallel": 5,
+      "cpu_moe_layers": "auto",
+      "gpu_layers": 999,
+      "short": "Small 9B"
+    },
+    "big": {
+      "model_hf": "unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_XL",
+      "model_label": "Qwen3.6 35B-A3B",
+      "model_download_gb": 23,
+      "context_total": 65536,
+      "parallel": 5,
+      "cpu_moe_layers": "auto",
+      "nvidia_only": true,
+      "short": "Big 35B"
+    },
+    "bonsai": {
+      "model_hf": "prism-ml/Ternary-Bonsai-2-27B-gguf",
+      "model_file": "Ternary-Bonsai-2-27B-Q2_0.gguf",
+      "model_label": "Bonsai 2 27B (Qwen3.8, squished)",
+      "model_download_gb": 7.6,
+      "context_total": 32768,
+      "parallel": 3,
+      "cpu_moe_layers": "auto",
+      "gpu_layers": 999,
+      "no_reasoning": true,
+      "short": "Bonsai 27B",
+      "cache_word": "bonsai"
+    },
+    "arete": {
+      "model_hf": "bartowski/NousResearch_Arete-27B-GGUF",
+      "model_file": "NousResearch_Arete-27B-IQ4_XS.gguf",
+      "model_label": "Arete 27B (Nous, Qwen3.8 27B)",
+      "model_download_gb": 15.2,
+      "context_total": 32768,
+      "parallel": 3,
+      "cpu_moe_layers": "auto",
+      "gpu_layers": 999,
+      "cache_word": "arete",
+      "short": "Arete 27B",
+      "nvidia_only": true
+    }
+  },
+  "discord_app_id": ""
+}
